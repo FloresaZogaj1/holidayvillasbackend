@@ -1,3 +1,4 @@
+// server.js
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -18,33 +19,53 @@ const {
 } = process.env;
 
 const app = express();
+
+// parsers
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
+
+// security & logs
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(morgan("tiny"));
 
-// CORS (lista me presje)
-const allowList = CORS_ORIGIN.split(",").map(s => s.trim()).filter(Boolean);
+/* --- CORS i saktë (lista me presje + OPTIONS) --- */
+const allowList = (CORS_ORIGIN || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// që CDN/cache të respektojë origjinën
+app.use((req, res, next) => {
+  res.header("Vary", "Origin");
+  next();
+});
+
 app.use(
   cors({
     origin: (origin, cb) => {
+      // lejo pa Origin (p.sh. curl/health) dhe origjinat në listë
       if (!origin || allowList.includes(origin)) return cb(null, true);
       return cb(new Error("Not allowed by CORS: " + origin));
     },
     credentials: true,
+    methods: ["GET", "POST", "OPTIONS"],
+    allowedHeaders: ["Content-Type"],
   })
 );
 
-// health
+// lejo preflight për të gjitha rrugët
+app.options("*", cors());
+
+/* --- Health --- */
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// NestPay hash (sha512 → base64)
+/* --- NestPay helpers --- */
 function makeHash({ clientid, oid, amount, okUrl, failUrl, rnd, storekey }) {
   const plain = `${clientid}${oid}${amount}${okUrl}${failUrl}${rnd}${storekey}`;
   return crypto.createHash("sha512").update(plain, "utf8").digest("base64");
 }
 
-// INIT → kthen { gate, fields } për auto-POST te banka
+/* --- INIT: kthen { gate, fields } që fronti të auto-POST te banka --- */
 app.post("/api/payments/init", (req, res) => {
   try {
     const { amount, email, meta } = req.body || {};
@@ -77,7 +98,7 @@ app.post("/api/payments/init", (req, res) => {
       storetype: "3D_PAY_HOSTING",
       lang: "en",
       email: email || "",
-      // description: JSON.stringify(meta || {})
+      // description: JSON.stringify(meta || {}),
     };
 
     return res.json({ gate: BKT_3D_GATE, fields, oid, meta: meta || null });
@@ -86,7 +107,7 @@ app.post("/api/payments/init", (req, res) => {
   }
 });
 
-// OK/FAIL (POST nga banka) → redirect te fronti
+/* --- OK/FAIL (POST nga banka) → redirect te fronti --- */
 app.post("/api/payments/ok", (req, res) => {
   try {
     const { oid } = req.body || {};
@@ -110,6 +131,7 @@ app.post("/api/payments/fail", (req, res) => {
   }
 });
 
+/* --- Start --- */
 app.listen(PORT, () => {
   console.log(`[payments] listening on :${PORT}`);
   console.log(`Allow CORS: ${allowList.join(" | ") || "(none)"}`);
