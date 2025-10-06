@@ -1,11 +1,9 @@
-// server.js (ESM)
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import crypto from "crypto";
-import { randomUUID } from "crypto";
 
 const {
   PORT = 4000,
@@ -20,16 +18,12 @@ const {
 } = process.env;
 
 const app = express();
-
-// parsers
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
-
-// security & logs
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(morgan("tiny"));
 
-// CORS (support lista me presje)
+// CORS (lista me presje)
 const allowList = CORS_ORIGIN.split(",").map(s => s.trim()).filter(Boolean);
 app.use(
   cors({
@@ -44,21 +38,19 @@ app.use(
 // health
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// util: NestPay SHA512 base64
+// NestPay hash (sha512 → base64)
 function makeHash({ clientid, oid, amount, okUrl, failUrl, rnd, storekey }) {
   const plain = `${clientid}${oid}${amount}${okUrl}${failUrl}${rnd}${storekey}`;
   return crypto.createHash("sha512").update(plain, "utf8").digest("base64");
 }
 
-/**
- * INIT – kthen GATE + FIELDS (fronti bën POST te banka)
- */
+// INIT → kthen { gate, fields } për auto-POST te banka
 app.post("/api/payments/init", (req, res) => {
   try {
     const { amount, email, meta } = req.body || {};
     if (!amount) return res.status(400).json({ error: "amount required" });
 
-    const oid = randomUUID().replace(/-/g, "").slice(0, 20); // max 20
+    const oid = crypto.randomUUID().replace(/-/g, "").slice(0, 20);
     const AMOUNT = Number(amount).toFixed(2);
     const RND = String(Date.now());
 
@@ -85,7 +77,7 @@ app.post("/api/payments/init", (req, res) => {
       storetype: "3D_PAY_HOSTING",
       lang: "en",
       email: email || "",
-      // description: JSON.stringify(meta || {}), // opsionale
+      // description: JSON.stringify(meta || {})
     };
 
     return res.json({ gate: BKT_3D_GATE, fields, oid, meta: meta || null });
@@ -94,17 +86,14 @@ app.post("/api/payments/init", (req, res) => {
   }
 });
 
-/**
- * OK/FALLBACK – Banka POST-on këtu; ne ridërgojmë në front.
- * Banka mund të dërgojë shumë fusha; i ruajmë minimalisht dhe bëjmë redirect 303.
- */
+// OK/FAIL (POST nga banka) → redirect te fronti
 app.post("/api/payments/ok", (req, res) => {
   try {
     const { oid } = req.body || {};
     const url = new URL(FRONT_OK);
     if (oid) url.searchParams.set("oid", oid);
     return res.redirect(303, url.toString());
-  } catch (e) {
+  } catch {
     return res.redirect(303, FRONT_OK);
   }
 });
@@ -116,7 +105,7 @@ app.post("/api/payments/fail", (req, res) => {
     if (oid) url.searchParams.set("oid", oid);
     if (ErrMsg) url.searchParams.set("msg", ErrMsg);
     return res.redirect(303, url.toString());
-  } catch (e) {
+  } catch {
     return res.redirect(303, FRONT_FAIL);
   }
 });
