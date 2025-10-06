@@ -7,8 +7,6 @@ import crypto from "crypto";
 
 const {
   PORT = 4000,
-  // mund ta lësh bosh tani — middleware më poshtë do e lejojë origin-in e ardhur
-  CORS_ORIGIN = "",
   BKT_CLIENT_ID,
   BKT_STORE_KEY,
   BKT_3D_GATE,
@@ -20,35 +18,23 @@ const {
 
 const app = express();
 
-/* =================== CORS ULTRA-ROBUST (manual) =================== */
-// Lista opsionale (përdoret për logjikë/validim; po të duash mund të kufizosh këtu)
-const allowList = (CORS_ORIGIN || "")
-  .split(",")
-  .map(s => s.trim())
-  .filter(Boolean);
-
-// vendos header-at CORS për ÇDO kërkesë; për OPTIONS kthe 204 menjëherë
+/* ------------ CORS (fix për preflight) ------------ */
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-
-  // gjithmonë njofto cache/CDN që varet nga Origin
+  if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Vary", "Origin");
-
-  // ECHO origin-in e kërkesës (lejon edhe preflight nga çdo origin)
-  if (origin) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  }
-  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-
-  if (req.method === "OPTIONS") {
-    // preflight mbyllet këtu (pa kaluar te routes)
-    return res.status(204).end();
-  }
+  const reqHeaders = req.headers["access-control-request-headers"];
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    reqHeaders || "Content-Type, Accept, Origin, Authorization"
+  );
+  // s’përdorim cookie/session
+  res.setHeader("Access-Control-Allow-Credentials", "false");
+  if (req.method === "OPTIONS") return res.status(204).end();
   next();
 });
-/* ================================================================== */
+/* -------------------------------------------------- */
 
 // Parsers
 app.use(express.urlencoded({ extended: true }));
@@ -58,7 +44,7 @@ app.use(express.json());
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(morgan("tiny"));
 
-// Health & root (për prova të shpejta)
+// Health & root
 app.get("/", (_req, res) => res.json({ ok: true, service: "payments" }));
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
@@ -98,7 +84,7 @@ app.post("/api/payments/init", (req, res) => {
       currency: "978",
       rnd: RND,
       hash,
-storetype: "3D_Pay_Hosting", // (jo "3D_PAY_HOSTING")
+      storetype: "3D_Pay_Hosting", // CASE-SENSITIVE sipas Payten/BKT
       lang: "en",
       email: email || "",
       // description: JSON.stringify(meta || {}),
@@ -136,5 +122,4 @@ app.post("/api/payments/fail", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`[payments] listening on :${PORT}`);
-  console.log(`(optional allowList) ${allowList.join(" | ") || "(none)"}`);
 });
