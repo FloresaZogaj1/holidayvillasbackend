@@ -1,7 +1,6 @@
-// server.js (ESM)
+// server.js
 import "dotenv/config";
 import express from "express";
-import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import crypto from "crypto";
@@ -20,6 +19,32 @@ const {
 
 const app = express();
 
+// ------------ CORS ultra-robust (manual) ------------
+const allowList = (CORS_ORIGIN || "")
+  .split(",")
+  .map(s => s.trim())
+  .filter(Boolean);
+
+const isAllowed = (origin) => !!origin && allowList.includes(origin);
+
+// vendos header-at CORS për çdo request (edhe kur s’kalon te routes)
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  res.header("Vary", "Origin");
+  if (isAllowed(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
+    res.header("Access-Control-Allow-Credentials", "true");
+    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type");
+  }
+  // përgjigju menjëherë preflight-it
+  if (req.method === "OPTIONS") {
+    return res.status(204).end();
+  }
+  next();
+});
+// -----------------------------------------------------
+
 // Parsers
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
@@ -28,44 +53,16 @@ app.use(express.json());
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(morgan("tiny"));
 
-/* -------- CORS i saktë (lista me presje + OPTIONS) -------- */
-const allowList = (CORS_ORIGIN || "")
-  .split(",")
-  .map((s) => s.trim())
-  .filter(Boolean);
-
-// bëj cache-friendly për CDN/proxy
-app.use((req, res, next) => {
-  res.header("Vary", "Origin");
-  next();
-});
-
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin || allowList.includes(origin)) return cb(null, true);
-      return cb(new Error("Not allowed by CORS: " + origin));
-    },
-    credentials: true,
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-  })
-);
-
-// lejo preflight
-app.options("*", cors());
-/* ----------------------------------------------------------- */
-
 // Health
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// NestPay helper – SHA512 → base64
+// NestPay helper
 function makeHash({ clientid, oid, amount, okUrl, failUrl, rnd, storekey }) {
   const plain = `${clientid}${oid}${amount}${okUrl}${failUrl}${rnd}${storekey}`;
   return crypto.createHash("sha512").update(plain, "utf8").digest("base64");
 }
 
-// INIT → kthen { gate, fields } (fronti auto-POST te banka)
+// INIT → { gate, fields }
 app.post("/api/payments/init", (req, res) => {
   try {
     const { amount, email, meta } = req.body || {};
@@ -98,36 +95,36 @@ app.post("/api/payments/init", (req, res) => {
       storetype: "3D_PAY_HOSTING",
       lang: "en",
       email: email || "",
-      // description: JSON.stringify(meta || {}), // opsionale
+      // description: JSON.stringify(meta || {})
     };
 
-    return res.json({ gate: BKT_3D_GATE, fields, oid, meta: meta || null });
+    res.json({ gate: BKT_3D_GATE, fields, oid, meta: meta || null });
   } catch (e) {
-    return res.status(500).json({ error: e.message });
+    res.status(500).json({ error: e.message });
   }
 });
 
-// OK/FAIL (POST nga banka) → redirect te fronti
+// Banka POST-on këtu → redirect te fronti
 app.post("/api/payments/ok", (req, res) => {
   try {
     const { oid } = req.body || {};
-    const url = new URL(FRONT_OK);
-    if (oid) url.searchParams.set("oid", oid);
-    return res.redirect(303, url.toString());
+    const u = new URL(FRONT_OK);
+    if (oid) u.searchParams.set("oid", oid);
+    res.redirect(303, u.toString());
   } catch {
-    return res.redirect(303, FRONT_OK);
+    res.redirect(303, FRONT_OK);
   }
 });
 
 app.post("/api/payments/fail", (req, res) => {
   try {
     const { oid, ErrMsg } = req.body || {};
-    const url = new URL(FRONT_FAIL);
-    if (oid) url.searchParams.set("oid", oid);
-    if (ErrMsg) url.searchParams.set("msg", ErrMsg);
-    return res.redirect(303, url.toString());
+    const u = new URL(FRONT_FAIL);
+    if (oid) u.searchParams.set("oid", oid);
+    if (ErrMsg) u.searchParams.set("msg", ErrMsg);
+    res.redirect(303, u.toString());
   } catch {
-    return res.redirect(303, FRONT_FAIL);
+    res.redirect(303, FRONT_FAIL);
   }
 });
 
