@@ -1,4 +1,4 @@
-// server.js
+// server.js (ESM)
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -20,21 +20,21 @@ const {
 
 const app = express();
 
-// parsers
+// Parsers
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// security & logs
+// Security & logs
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(morgan("tiny"));
 
-/* --- CORS i saktë (lista me presje + OPTIONS) --- */
+/* -------- CORS i saktë (lista me presje + OPTIONS) -------- */
 const allowList = (CORS_ORIGIN || "")
   .split(",")
   .map((s) => s.trim())
   .filter(Boolean);
 
-// që CDN/cache të respektojë origjinën
+// bëj cache-friendly për CDN/proxy
 app.use((req, res, next) => {
   res.header("Vary", "Origin");
   next();
@@ -43,7 +43,6 @@ app.use((req, res, next) => {
 app.use(
   cors({
     origin: (origin, cb) => {
-      // lejo pa Origin (p.sh. curl/health) dhe origjinat në listë
       if (!origin || allowList.includes(origin)) return cb(null, true);
       return cb(new Error("Not allowed by CORS: " + origin));
     },
@@ -53,19 +52,20 @@ app.use(
   })
 );
 
-// lejo preflight për të gjitha rrugët
+// lejo preflight
 app.options("*", cors());
+/* ----------------------------------------------------------- */
 
-/* --- Health --- */
+// Health
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-/* --- NestPay helpers --- */
+// NestPay helper – SHA512 → base64
 function makeHash({ clientid, oid, amount, okUrl, failUrl, rnd, storekey }) {
   const plain = `${clientid}${oid}${amount}${okUrl}${failUrl}${rnd}${storekey}`;
   return crypto.createHash("sha512").update(plain, "utf8").digest("base64");
 }
 
-/* --- INIT: kthen { gate, fields } që fronti të auto-POST te banka --- */
+// INIT → kthen { gate, fields } (fronti auto-POST te banka)
 app.post("/api/payments/init", (req, res) => {
   try {
     const { amount, email, meta } = req.body || {};
@@ -98,7 +98,7 @@ app.post("/api/payments/init", (req, res) => {
       storetype: "3D_PAY_HOSTING",
       lang: "en",
       email: email || "",
-      // description: JSON.stringify(meta || {}),
+      // description: JSON.stringify(meta || {}), // opsionale
     };
 
     return res.json({ gate: BKT_3D_GATE, fields, oid, meta: meta || null });
@@ -107,7 +107,7 @@ app.post("/api/payments/init", (req, res) => {
   }
 });
 
-/* --- OK/FAIL (POST nga banka) → redirect te fronti --- */
+// OK/FAIL (POST nga banka) → redirect te fronti
 app.post("/api/payments/ok", (req, res) => {
   try {
     const { oid } = req.body || {};
@@ -131,7 +131,6 @@ app.post("/api/payments/fail", (req, res) => {
   }
 });
 
-/* --- Start --- */
 app.listen(PORT, () => {
   console.log(`[payments] listening on :${PORT}`);
   console.log(`Allow CORS: ${allowList.join(" | ") || "(none)"}`);
