@@ -7,6 +7,7 @@ import crypto from "crypto";
 
 const {
   PORT = 4000,
+  // mund ta lësh bosh tani — middleware më poshtë do e lejojë origin-in e ardhur
   CORS_ORIGIN = "",
   BKT_CLIENT_ID,
   BKT_STORE_KEY,
@@ -19,50 +20,55 @@ const {
 
 const app = express();
 
-// ------------ CORS ultra-robust (manual) ------------
+/* =================== CORS ULTRA-ROBUST (manual) =================== */
+// Lista opsionale (përdoret për logjikë/validim; po të duash mund të kufizosh këtu)
 const allowList = (CORS_ORIGIN || "")
   .split(",")
   .map(s => s.trim())
   .filter(Boolean);
 
-const isAllowed = (origin) => !!origin && allowList.includes(origin);
-
-// vendos header-at CORS për çdo request (edhe kur s’kalon te routes)
+// vendos header-at CORS për ÇDO kërkesë; për OPTIONS kthe 204 menjëherë
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  res.header("Vary", "Origin");
-  if (isAllowed(origin)) {
-    res.header("Access-Control-Allow-Origin", origin);
-    res.header("Access-Control-Allow-Credentials", "true");
-    res.header("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-    res.header("Access-Control-Allow-Headers", "Content-Type");
+
+  // gjithmonë njofto cache/CDN që varet nga Origin
+  res.setHeader("Vary", "Origin");
+
+  // ECHO origin-in e kërkesës (lejon edhe preflight nga çdo origin)
+  if (origin) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
   }
-  // përgjigju menjëherë preflight-it
+  res.setHeader("Access-Control-Allow-Credentials", "true");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+
   if (req.method === "OPTIONS") {
+    // preflight mbyllet këtu (pa kaluar te routes)
     return res.status(204).end();
   }
   next();
 });
-// -----------------------------------------------------
+/* ================================================================== */
 
 // Parsers
 app.use(express.urlencoded({ extended: true }));
 app.use(express.json());
 
-// Security & logs
+// Siguri & logje
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(morgan("tiny"));
 
-// Health
+// Health & root (për prova të shpejta)
+app.get("/", (_req, res) => res.json({ ok: true, service: "payments" }));
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-// NestPay helper
+// Helper për NestPay hash SHA512 → base64
 function makeHash({ clientid, oid, amount, okUrl, failUrl, rnd, storekey }) {
   const plain = `${clientid}${oid}${amount}${okUrl}${failUrl}${rnd}${storekey}`;
   return crypto.createHash("sha512").update(plain, "utf8").digest("base64");
 }
 
-// INIT → { gate, fields }
+// INIT → kthen { gate, fields } (fronti auto-POST te banka)
 app.post("/api/payments/init", (req, res) => {
   try {
     const { amount, email, meta } = req.body || {};
@@ -95,7 +101,7 @@ app.post("/api/payments/init", (req, res) => {
       storetype: "3D_PAY_HOSTING",
       lang: "en",
       email: email || "",
-      // description: JSON.stringify(meta || {})
+      // description: JSON.stringify(meta || {}),
     };
 
     res.json({ gate: BKT_3D_GATE, fields, oid, meta: meta || null });
@@ -104,7 +110,7 @@ app.post("/api/payments/init", (req, res) => {
   }
 });
 
-// Banka POST-on këtu → redirect te fronti
+// Banka POST-on këtu → backend bën redirect te fronti
 app.post("/api/payments/ok", (req, res) => {
   try {
     const { oid } = req.body || {};
@@ -130,5 +136,5 @@ app.post("/api/payments/fail", (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`[payments] listening on :${PORT}`);
-  console.log(`Allow CORS: ${allowList.join(" | ") || "(none)"}`);
+  console.log(`(optional allowList) ${allowList.join(" | ") || "(none)"}`);
 });
