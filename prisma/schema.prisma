@@ -1,0 +1,27 @@
+// prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Booking {
+  id        Int      @id @default(autoincrement())
+  villaSlug String
+  name      String
+  email     String
+  phone     String?
+  checkIn   DateTime
+  checkOut  DateTime
+  guests    Int
+  amount    Decimal  @db.Decimal(10, 2)
+  status    String   // "pending" | "paid" | të tjera sipas nevojës
+  createdAt DateTime @default(now())
+
+  @@index([villaSlug])
+  @@index([email])
+  @@index([status])
+}
