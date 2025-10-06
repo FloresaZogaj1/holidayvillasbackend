@@ -98,7 +98,7 @@ app.post("/api/payments/init", (req, res) => {
       currency: "978",
       rnd: RND,
       hash,
-      storetype: "3D_PAY_HOSTING",
+storetype: "3D_Pay_Hosting", // (jo "3D_PAY_HOSTING")
       lang: "en",
       email: email || "",
       // description: JSON.stringify(meta || {}),
