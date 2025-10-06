@@ -8,17 +8,17 @@ import crypto from "crypto";
 const {
   PORT = 4000,
 
-  // Payten/BKT sandbox/prod
+  // Payten/BKT
   BKT_CLIENT_ID,
   BKT_STORE_KEY,
   BKT_3D_GATE,
 
-  // URL-t ku BANKA POST-on pas 3DS (duhet të jenë publike të backendit)
+  // Ku BANKA POST-on pas 3DS (backend publik)
   BKT_OK_URL,
   BKT_FAIL_URL,
 
-  // URL-t ku ti do ta dërgosh përdoruesin (fronti) pas OK/FAIL
-  // REKOMANDIM: përdori me HASH p.sh. https://holidayvillasks.com/#/payment/success
+  // Ku ridërgojmë përdoruesin (frontend)
+  // p.sh. https://holidayvillasks.com/#/payment/success
   FRONT_OK,
   FRONT_FAIL,
 } = process.env;
@@ -31,16 +31,12 @@ app.use((req, res, next) => {
   if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-
   const reqHeaders = req.headers["access-control-request-headers"];
   res.setHeader(
     "Access-Control-Allow-Headers",
     reqHeaders || "Content-Type, Accept, Origin, Authorization"
   );
-
-  // s’po përdorim cookie/session
   res.setHeader("Access-Control-Allow-Credentials", "false");
-
   if (req.method === "OPTIONS") return res.status(204).end();
   next();
 });
@@ -58,32 +54,47 @@ app.use(morgan("tiny"));
 app.get("/", (_req, res) => res.json({ ok: true, service: "payments" }));
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-/** NestPay/Payten: SHA512 → base64, me concatenim fiks:
- * clientid + oid + amount + okUrl + failUrl + rnd + storekey  (UTF-8, pa ndarës)
- */
+/* ----------------------- Helpers ----------------------- */
+// SHA512 → base64 mbi concatenim fiks:
+// clientid + oid + amount + okUrl + failUrl + rnd + storekey
 function makeHash({ clientid, oid, amount, okUrl, failUrl, rnd, storekey }) {
   const plain = `${clientid}${oid}${amount}${okUrl}${failUrl}${rnd}${storekey}`;
   return crypto.createHash("sha512").update(plain, "utf8").digest("base64");
 }
 
-/** INIT → kthen { gate, fields, oid }
- * Frontend-i bën auto-POST të 'fields' te 'gate' (BKT 3D gateway)
- */
+// Vendos parametrat pas '#' nëse FRONT_* është hash-route (#/...)
+function pushParamsIntoHash(baseUrl, params = {}) {
+  const u = new URL(baseUrl);
+
+  // Ka hash-route?
+  if (u.hash && u.hash.startsWith("#/")) {
+    const [path, q] = u.hash.slice(1).split("?"); // heq '#'
+    const hq = new URLSearchParams(q || "");
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") hq.set(k, String(v));
+    });
+    u.hash = `${path}?${hq.toString()}`; // query pas hash-it
+    u.search = ""; // hiq query para hash-it
+  } else {
+    // s’ka hash → vendosi në search normal
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== "") u.searchParams.set(k, String(v));
+    });
+  }
+  return u.toString();
+}
+/* ------------------------------------------------------ */
+
+/** INIT → kthen { gate, fields, oid } për auto-POST te gateway i BKT */
 app.post("/api/payments/init", (req, res) => {
   try {
     const { amount, email, meta } = req.body || {};
     if (amount == null) return res.status(400).json({ error: "amount required" });
 
-    // gjithmonë 2 shifra decimale me pikë
-    const AMOUNT = Number(amount).toFixed(2);
-
-    // OID max 20 (zakon pagese)
+    const AMOUNT = Number(amount).toFixed(2);           // p.sh. "120.00"
     const oid = crypto.randomUUID().replace(/-/g, "").slice(0, 20);
-
-    // RND unik
     const RND = String(Date.now());
 
-    // Hash (ver3 = SHA512 base64)
     const hash = makeHash({
       clientid: BKT_CLIENT_ID,
       oid,
@@ -104,8 +115,8 @@ app.post("/api/payments/init", (req, res) => {
       currency: "978",
       rnd: RND,
       hash,
-      storetype: "3D_Pay_Hosting", // CASE-SENSITIVE si në emailin e bankës
-      hashAlgorithm: "ver3",        // e nevojshme për SHA512 në shumicën e setup-eve
+      storetype: "3D_Pay_Hosting",  // CASE-SENSITIVE si në kredenciale
+      hashAlgorithm: "ver3",        // SHA-512
       encoding: "UTF-8",
       lang: "en",
       email: email || "",
@@ -118,13 +129,12 @@ app.post("/api/payments/init", (req, res) => {
   }
 });
 
-/** BANKA POST-on tek këto; ne ridërgojmë te fronti me query params */
+/** BANKA POST-on tek këto; ne ridërgojmë te fronti me query pas hash-it */
 app.post("/api/payments/ok", (req, res) => {
   try {
     const { oid } = req.body || {};
-    const u = new URL(FRONT_OK);
-    if (oid) u.searchParams.set("oid", oid);
-    return res.redirect(303, u.toString());
+    const target = pushParamsIntoHash(FRONT_OK, { oid });
+    return res.redirect(303, target);
   } catch {
     return res.redirect(303, FRONT_OK);
   }
@@ -133,12 +143,9 @@ app.post("/api/payments/ok", (req, res) => {
 app.post("/api/payments/fail", (req, res) => {
   try {
     const { oid, ErrMsg, Response } = req.body || {};
-    const u = new URL(FRONT_FAIL);
-    if (oid) u.searchParams.set("oid", oid);
-    // Mesazhi nga banka (nëse ka). Provo ErrMsg, përndryshe Response.
     const msg = ErrMsg || Response || "Payment failed";
-    if (msg) u.searchParams.set("msg", String(msg));
-    return res.redirect(303, u.toString());
+    const target = pushParamsIntoHash(FRONT_FAIL, { oid, msg });
+    return res.redirect(303, target);
   } catch {
     return res.redirect(303, FRONT_FAIL);
   }
