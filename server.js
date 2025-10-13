@@ -69,19 +69,15 @@ function makeHashV3(fields, storeKeyRaw) {
   const storeKey = String(storeKeyRaw ?? "").trim();
   const esc = (v) => String(v ?? "").replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 
-  const primary = ORDER.filter((k) =>
-    Object.prototype.hasOwnProperty.call(fields, k)
-  );
-  const rest = Object.keys(fields)
-    .filter((k) => !["hash", "encoding", ...primary].includes(k))
-    .sort();
+  const keys = Object.keys(fields)
+    .filter(k => k !== "hash" && k !== "encoding")        // vetëm këto përfshihen
+    .sort((a,b) => a.localeCompare(b, "en", { sensitivity: "base" })); // A–Z
 
-  const keys = [...primary, ...rest];
-  const plaintext = keys.map((k) => esc(fields[k])).join("|") + "|" + storeKey;
-
+  const plaintext = keys.map(k => esc(fields[k])).join("|") + "|" + storeKey;
   return crypto.createHash("sha512").update(plaintext, "utf8").digest("base64");
 }
 
+  
 function pushParamsIntoHash(baseUrl, params = {}) {
   const u = new URL(baseUrl);
   if (u.hash && u.hash.startsWith("#/")) {
