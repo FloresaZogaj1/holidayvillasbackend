@@ -12,6 +12,8 @@ const {
   BKT_CLIENT_ID,
   BKT_STORE_KEY,
   BKT_3D_GATE,
+  BKT_STORE_TYPE = "3D_PAY_HOSTING",
+  BKT_CURRENCY = "978",
 
   // Backend callbacks (publikë) ku BANKA POST-on pas 3DS
   BKT_OK_URL,
@@ -20,15 +22,20 @@ const {
   // Frontend routes (hash router) ku ridërgojmë user-in
   FRONT_OK,
   FRONT_FAIL,
+
+  // CORS
+  CORS_ORIGIN,
 } = process.env;
 
 const app = express();
 
 /* --------------------------- CORS (preflight) --------------------------- */
-// lejon vetëm origjinën e sitit tënd në prod (ndrysho si të duash)
+// lejo vetëm origjinën e sitit tënd
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (origin) res.setHeader("Access-Control-Allow-Origin", origin);
+  const origin = req.headers.origin || "";
+  if (origin && CORS_ORIGIN && origin === CORS_ORIGIN) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
   res.setHeader("Vary", "Origin");
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
   const reqHeaders = req.headers["access-control-request-headers"];
@@ -55,9 +62,9 @@ app.get("/", (_req, res) => res.json({ ok: true, service: "payments" }));
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 /* ----------------------- Helpers ----------------------- */
-// Rregull i ver3: hash = SHA-512(Base64) mbi VLERAT e të GJITHA fushave (përveç 'hash' & 'encoding'),
-// të renditura alfabetikisht sipas EMRIT të fushës, të bashkuara me '|', pastaj shtohet '|'+storeKey.
-// Karakteret '\' dhe '|' duhen "escape"-uar në vlera.
+// ver3: hash = Base64(SHA-512( vlerat e FUSHAVE (pa 'hash' & 'encoding'),
+// të renditura A–Z dhe bashkuara me '|' ) + '|' + storeKey )
+// Duhet escape për '\' dhe '|'
 function makeHashV3(fields, storeKey) {
   const escape = (v) =>
     String(v ?? "")
@@ -103,21 +110,21 @@ app.post("/api/payments/init", (req, res) => {
     const oid = crypto.randomUUID().replace(/-/g, "").slice(0, 20);
     const RND = String(Date.now());
 
-    // Fushat sipas emrave që pranon EST (këto futen në hash ver3)
+    // Fushat që pranon EST (këto futen në hash ver3)
     const fields = {
       amount: AMOUNT,
       clientid: BKT_CLIENT_ID,
-      currency: "978",
+      currency: String(BKT_CURRENCY),
       email: email || "",
-      encoding: "UTF-8",         // NUK futet në hash (por e dërgojmë)
+      encoding: "UTF-8",        // NUK futet në hash
       failUrl: BKT_FAIL_URL,
-      hashAlgorithm: "ver3",     // ver3 = rend A–Z + '|'
-      Instalment: "",            // bosh, por e pranishme (futet në hash si "")
+      hashAlgorithm: "ver3",
+      instalment: "",           // bosh por e pranishme
       lang: "en",
       okUrl: BKT_OK_URL,
       oid,
       rnd: RND,
-      storetype: "3D_Pay_Hosting", // fikse si në kredenciale
+      storetype: String(BKT_STORE_TYPE), // p.sh. "3D_PAY_HOSTING"
       TranType: "Auth",
       // description: JSON.stringify(meta || {}), // opsionale
     };
@@ -131,11 +138,18 @@ app.post("/api/payments/init", (req, res) => {
   }
 });
 
-/** BANKA POST-on tek këto; ne ridërgojmë te fronti me query pas hash-it */
+/** BANKA POST-on tek këto; ridërgo te fronti me query pas hash-it */
 app.post("/api/payments/ok", (req, res) => {
   try {
-    const { oid } = req.body || {};
-    const target = pushParamsIntoHash(FRONT_OK, { oid });
+    // Opsionale: verifikim i shpejtë i suksesit
+    const { oid, ProcReturnCode, mdStatus } = req.body || {};
+    const mdOk = ["1", "2", "3", "4"].includes(String(mdStatus || ""));
+    const bankOk = String(ProcReturnCode || "") === "00";
+
+    const target = pushParamsIntoHash(FRONT_OK, {
+      oid,
+      ok: bankOk && mdOk ? "1" : "0",
+    });
     return res.redirect(303, target);
   } catch {
     return res.redirect(303, FRONT_OK);
