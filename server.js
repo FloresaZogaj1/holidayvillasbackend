@@ -7,19 +7,15 @@ import crypto from "crypto";
 
 const {
   PORT = 4000,
-  // BKT / Payten
   BKT_CLIENT_ID,
   BKT_STORE_KEY,
   BKT_3D_GATE,
   BKT_STORE_TYPE = "3D_PAY_HOSTING",
   BKT_CURRENCY = "978",
-  // Backend callbacks (publike)
   BKT_OK_URL,
   BKT_FAIL_URL,
-  // Frontend routes (hash router)
   FRONT_OK,
   FRONT_FAIL,
-  // CORS
   CORS_ORIGIN,
 } = process.env;
 
@@ -51,38 +47,58 @@ app.use(morgan("tiny"));
 app.get("/", (_req, res) => res.json({ ok: true, service: "payments" }));
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
-/* ----------------------- Helpers ----------------------- */
-// HASH ver3: ASCII sort; escape vetëm '\' dhe '|'
+/* ----------------------- HASH ver3 ----------------------- */
+// rend i fiksuar sipas Payten; ASCII sort për të tjerat
+const ORDER = [
+  "clientid",
+  "oid",
+  "amount",
+  "okUrl",
+  "failUrl",
+  "TranType",
+  "instalment",
+  "rnd",
+  "hashAlgorithm",
+  "storetype",
+  "lang",
+  "currency",
+  "email",
+];
+
 function makeHashV3(fields, storeKeyRaw) {
   const storeKey = String(storeKeyRaw ?? "").trim();
   const esc = (v) => String(v ?? "").replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
 
-  const keys = Object.keys(fields)
-    .filter((k) => {
-      const lk = k.toLowerCase();
-      return lk !== "hash" && lk !== "encoding";
-    })
-    .sort(); // ASCII
+  const primary = ORDER.filter((k) =>
+    Object.prototype.hasOwnProperty.call(fields, k)
+  );
+  const rest = Object.keys(fields)
+    .filter((k) => !["hash", "encoding", ...primary].includes(k))
+    .sort();
 
+  const keys = [...primary, ...rest];
   const plaintext = keys.map((k) => esc(fields[k])).join("|") + "|" + storeKey;
+
   return crypto.createHash("sha512").update(plaintext, "utf8").digest("base64");
 }
 
-// Vendos parametrat pas '#' nëse FRONT_* janë hash-route
 function pushParamsIntoHash(baseUrl, params = {}) {
   const u = new URL(baseUrl);
   if (u.hash && u.hash.startsWith("#/")) {
     const [path, q] = u.hash.slice(1).split("?");
     const hq = new URLSearchParams(q || "");
-    Object.entries(params).forEach(([k, v]) => v != null && v !== "" && hq.set(k, String(v)));
+    Object.entries(params).forEach(
+      ([k, v]) => v != null && v !== "" && hq.set(k, String(v))
+    );
     u.hash = `${path}?${hq.toString()}`;
     u.search = "";
   } else {
-    Object.entries(params).forEach(([k, v]) => v != null && v !== "" && u.searchParams.set(k, String(v)));
+    Object.entries(params).forEach(
+      ([k, v]) => v != null && v !== "" && u.searchParams.set(k, String(v))
+    );
   }
   return u.toString();
 }
-/* ------------------------------------------------------ */
 
 /* -------------------- INIT → gateway fields -------------------- */
 app.post("/api/payments/init", (req, res) => {
@@ -95,25 +111,24 @@ app.post("/api/payments/init", (req, res) => {
     const RND = String(Date.now());
 
     const fields = {
-      amount: AMOUNT,
       clientid: BKT_CLIENT_ID,
+      oid,
+      amount: AMOUNT,
+      okUrl: BKT_OK_URL,
+      failUrl: BKT_FAIL_URL,
+      TranType: "Auth",
+      instalment: "",
+      rnd: RND,
+      hashAlgorithm: "ver3",
+      storetype: String(BKT_STORE_TYPE),
+      lang: "en",
       currency: String(BKT_CURRENCY),
       email: email || "",
       encoding: "UTF-8",
-      failUrl: BKT_FAIL_URL,
-      hashAlgorithm: "ver3",
-      instalment: "",
-      lang: "en",
-      okUrl: BKT_OK_URL,
-      oid,
-      rnd: RND,
-      storetype: String(BKT_STORE_TYPE),
-      TranType: "Auth",
     };
 
     fields.hash = makeHashV3(fields, BKT_STORE_KEY);
-
-    console.log("[pay-init] oid=%s amount=%s hash=%s", oid, AMOUNT, fields.hash);
+    console.log("[pay-init] OID=%s HASH=%s", oid, fields.hash);
 
     return res.json({ gate: BKT_3D_GATE, fields, oid, meta: meta || null });
   } catch (e) {
@@ -135,7 +150,10 @@ app.post("/api/payments/ok", (req, res) => {
     const { oid, ProcReturnCode, mdStatus } = req.body || {};
     const mdOk = ["1", "2", "3", "4"].includes(String(mdStatus || ""));
     const bankOk = String(ProcReturnCode || "") === "00";
-    const target = pushParamsIntoHash(FRONT_OK, { oid, ok: bankOk && mdOk ? "1" : "0" });
+    const target = pushParamsIntoHash(FRONT_OK, {
+      oid,
+      ok: bankOk && mdOk ? "1" : "0",
+    });
     return res.redirect(303, target);
   } catch {
     return res.redirect(303, FRONT_OK);
@@ -162,6 +180,4 @@ app.post("/api/payments/fail", (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`[payments] listening on :${PORT}`);
-});
+app.listen(PORT, () => console.log(`[payments] listening on :${PORT}`));
