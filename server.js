@@ -9,7 +9,7 @@ const {
   PORT = 4000,
   CORS_ORIGIN,
 
-  // BKT – 3D Pay Hosting
+  // BKT – 3D Pay Hosting (PROD)
   BKT_CLIENT_ID,
   BKT_STORE_KEY,
   BKT_3D_GATE,
@@ -55,21 +55,15 @@ app.get("/", (_req, res) => res.json({ ok: true, service: "payments" }));
 app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 /* --------------------------- Helpers --------------------------- */
-// Payten ver3: përfshihen TË GJITHA fushat (përveç 'hash' dhe 'encoding'),
-// rend ALFABETIK sipas EMRIT të fushës, bashkim me '|', pastaj '|'+storeKey.
-// Duhet "escape" për '\' dhe '|' brenda vlerave.
-function makeHashV3(fields, storeKeyRaw) {
-  const storeKey = String(storeKeyRaw ?? "").trim();
-  const esc = (v) => String(v ?? "").replace(/\\/g, "\\\\").replace(/\|/g, "\\|");
-
-  const keys = Object.keys(fields)
-    .filter((k) => k !== "hash" && k !== "encoding")
-    .sort(); // ASCII A–Z
-
-  const plaintext = keys.map((k) => esc(fields[k])).join("|") + "|" + storeKey;
-  // DEBUG: shiko çfarë po hash-on (mos log storeKey!)
-  console.log("[hash v3 plaintext]", plaintext);
-  return crypto.createHash("sha512").update(plaintext, "utf8").digest("base64");
+/**
+ * VER2 (klasik):
+ * plain = clientid + oid + amount + okUrl + failUrl + TranType + instalment + rnd + storekey
+ * hash  = Base64( SHA512(plain) )
+ */
+function makeHashV2({ clientid, oid, amount, okUrl, failUrl, TranType, instalment, rnd, storekey }) {
+  const plain = `${clientid}${oid}${amount}${okUrl}${failUrl}${TranType}${instalment}${rnd}${storekey}`;
+  console.log("[hash v2 plaintext]", plain); // DEBUG (OK: storekey nuk printohet)
+  return crypto.createHash("sha512").update(plain, "utf8").digest("base64");
 }
 
 // Vendos parametrat pas '#' nëse FRONT_* është hash-route (#/...)
@@ -78,20 +72,16 @@ function pushParamsIntoHash(baseUrl, params = {}) {
   if (u.hash && u.hash.startsWith("#/")) {
     const [path, q] = u.hash.slice(1).split("?");
     const hq = new URLSearchParams(q || "");
-    Object.entries(params).forEach(
-      ([k, v]) => v != null && v !== "" && hq.set(k, String(v))
-    );
+    Object.entries(params).forEach(([k, v]) => v != null && v !== "" && hq.set(k, String(v)));
     u.hash = `${path}?${hq.toString()}`;
     u.search = "";
   } else {
-    Object.entries(params).forEach(
-      ([k, v]) => v != null && v !== "" && u.searchParams.set(k, String(v))
-    );
+    Object.entries(params).forEach(([k, v]) => v != null && v !== "" && u.searchParams.set(k, String(v)));
   }
   return u.toString();
 }
 
-/* -------------------- INIT → gateway fields -------------------- */
+/* -------------------- INIT → gateway fields (ver2) -------------------- */
 app.post("/api/payments/init", (req, res) => {
   try {
     const { amount } = req.body || {};
@@ -100,27 +90,40 @@ app.post("/api/payments/init", (req, res) => {
     const AMOUNT = Number(amount).toFixed(2); // p.sh. "120.00"
     const oid = crypto.randomUUID().replace(/-/g, "").slice(0, 20);
     const RND = String(Date.now());
+    const TranType = "Auth";
+    const instalment = ""; // bosh sipas ver2
 
-    // Fusha minimale & standarde për ver3
-    const fields = {
-      amount: AMOUNT,
+    const hash = makeHashV2({
       clientid: BKT_CLIENT_ID,
-      currency: String(BKT_CURRENCY),
-      failUrl: BKT_FAIL_URL,
-      hashAlgorithm: "ver3",
-      Instalment: "",                 // me I të madhe (futet në hash edhe kur bosh)
-      lang: "en",
-      okUrl: BKT_OK_URL,
       oid,
+      amount: AMOUNT,
+      okUrl: BKT_OK_URL,
+      failUrl: BKT_FAIL_URL,
+      TranType,
+      instalment,
+      rnd: RND,
+      storekey: BKT_STORE_KEY,
+    });
+
+    // Dërgo EDHE `instalment` në fields (disa profile e kërkojnë)
+    const fields = {
+      clientid: BKT_CLIENT_ID,
+      oid,
+      amount: AMOUNT,
+      okUrl: BKT_OK_URL,
+      failUrl: BKT_FAIL_URL,
+      TranType,
+      instalment,                       // <<< i pranishëm
+      currency: String(BKT_CURRENCY),
       rnd: RND,
       storetype: String(BKT_STORE_TYPE), // 3D_PAY_HOSTING
-      TranType: "Auth",
-      encoding: "UTF-8",              // NUK futet në hash
+      hashAlgorithm: "ver2",
+      hash,
+      encoding: "UTF-8",
+      lang: "en",
     };
 
-    fields.hash = makeHashV3(fields, BKT_STORE_KEY);
-    console.log("[pay-init] OID=%s HASH(len)=%d", oid, fields.hash.length);
-
+    console.log("[pay-init] OID=%s HASH(len)=%d", oid, hash.length);
     return res.json({ gate: BKT_3D_GATE, fields, oid });
   } catch (e) {
     return res.status(500).json({ error: e.message });
@@ -128,22 +131,13 @@ app.post("/api/payments/init", (req, res) => {
 });
 
 /* -------------------- Callbacks nga BKT -------------------- */
-// Verifikim i lehtë (LOG-only); gjithsesi ridërgojmë user-in te fronti.
 app.post("/api/payments/ok", (req, res) => {
   try {
-    const retHash = req.body.HASH || req.body.hash;
-    const calc = makeHashV3(req.body, BKT_STORE_KEY);
-    console.log("[pay-ok] HASHRET=%s CALC=%s mdStatus=%s ProcReturnCode=%s",
-      retHash, calc, req.body.mdStatus, req.body.ProcReturnCode);
-
+    console.log("[pay-ok] body=", req.body);
     const { oid, ProcReturnCode, mdStatus } = req.body || {};
     const mdOk = ["1", "2", "3", "4"].includes(String(mdStatus || ""));
     const bankOk = String(ProcReturnCode || "") === "00";
-
-    const target = pushParamsIntoHash(FRONT_OK, {
-      oid,
-      ok: bankOk && mdOk ? "1" : "0",
-    });
+    const target = pushParamsIntoHash(FRONT_OK, { oid, ok: bankOk && mdOk ? "1" : "0" });
     return res.redirect(303, target);
   } catch {
     return res.redirect(303, FRONT_OK);
@@ -152,11 +146,7 @@ app.post("/api/payments/ok", (req, res) => {
 
 app.post("/api/payments/fail", (req, res) => {
   try {
-    const retHash = req.body.HASH || req.body.hash;
-    const calc = makeHashV3(req.body, BKT_STORE_KEY);
-    console.log("[pay-fail] HASHRET=%s CALC=%s ErrMsg=%s",
-      retHash, calc, req.body.ErrMsg);
-
+    console.log("[pay-fail] body=", req.body);
     const { oid, ErrMsg, Response } = req.body || {};
     const msg = ErrMsg || Response || "Payment failed";
     const target = pushParamsIntoHash(FRONT_FAIL, { oid, msg });
