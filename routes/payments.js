@@ -38,6 +38,19 @@ r.post("/payments/init", async (req, res) => {
     const plain = CLIENT_ID + oid + amt + okUrl + failUrl + TranType + Installment + rnd + STORE_KEY;
     const hash  = sha1b64(plain);
 
+    // --- DEBUG LOGGING ---
+    console.log("Hash Debug:");
+    console.log("clientid:", CLIENT_ID);
+    console.log("oid:", oid);
+    console.log("amount:", amt);
+    console.log("okUrl:", okUrl);
+    console.log("failUrl:", failUrl);
+    console.log("TranType:", TranType);
+    console.log("Installment:", Installment);
+    console.log("rnd:", rnd);
+    console.log("storekey:", STORE_KEY);
+    console.log("plain string for hash:", plain);
+    console.log("hash:", hash);
     const fields = {
       clientid: CLIENT_ID,
       oid,
@@ -55,6 +68,7 @@ r.post("/payments/init", async (req, res) => {
       HashAlgorithm: "ver3",
       hash,
     };
+    console.log("fields sent:", fields);
 
     return res.json({ gate: GATE, fields, oid });
   } catch (e) {
