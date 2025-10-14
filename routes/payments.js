@@ -35,7 +35,8 @@ r.post("/payments/init", async (req, res) => {
     const TranType = "Auth";
     const Installment = "";
 
-    const plain = CLIENT_ID + oid + amt + okUrl + failUrl + TranType + Installment + rnd + STORE_KEY;
+  // Make sure STORE_KEY is the actual store key from .env (e.g., SKEY3319)
+  const plain = CLIENT_ID + oid + amt + okUrl + failUrl + TranType + Installment + rnd + STORE_KEY;
     const hash  = sha1b64(plain);
 
     // --- DEBUG LOGGING ---
