@@ -115,6 +115,15 @@ function pushParamsIntoHash(baseUrl, params = {}) {
 }
 
 app.post("/api/payments/ok", (req, res) => {
+  console.log("[BKT RETURN - OK]", {
+    oid: req.body?.oid,
+    ProcReturnCode: req.body?.ProcReturnCode,
+    mdStatus: req.body?.mdStatus,
+    ErrMsg: req.body?.ErrMsg || req.body?.errmsg || req.body?.Response,
+    HostRefNum: req.body?.HostRefNum,
+    AuthCode: req.body?.AuthCode,
+  });
+
   const { oid, ProcReturnCode, mdStatus } = req.body || {};
   const mdOk = ["1", "2", "3", "4"].includes(String(mdStatus || ""));
   const bankOk = String(ProcReturnCode || "") === "00";
@@ -123,11 +132,19 @@ app.post("/api/payments/ok", (req, res) => {
 });
 
 app.post("/api/payments/fail", (req, res) => {
+ console.log("[BKT RETURN - FAIL]", {
+    oid: req.body?.oid,
+    ProcReturnCode: req.body?.ProcReturnCode,
+    mdStatus: req.body?.mdStatus,
+    ErrMsg: req.body?.ErrMsg || req.body?.errmsg || req.body?.Response,
+    HostRefNum: req.body?.HostRefNum,
+    AuthCode: req.body?.AuthCode,
+  });
+
   const { oid, ErrMsg, Response } = req.body || {};
   const msg = ErrMsg || Response || "Payment failed";
   const target = pushParamsIntoHash(FRONT_FAIL, { oid, msg });
   return res.redirect(303, target);
 });
-
 /* ------------ Listen ------------ */
 app.listen(PORT, () => console.log(`[payments] :${PORT}`));
