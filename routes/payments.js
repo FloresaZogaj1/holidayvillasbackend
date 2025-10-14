@@ -1,86 +1,100 @@
 // backend/routes/payments.js
+import express, { Router } from "express";
 import crypto from "crypto";
-import { Router } from "express";
 
 const r = Router();
+const urlencoded = express.urlencoded({ extended: false });
 
-// === helpers ===
-function formatAmount(n) {
-  // gjithmonë p.sh. 100.00
-  return Number(n).toFixed(2);
-}
+// ---------- ENV ----------
+const {
+  BKT_CLIENT_ID: CLIENT_ID,
+  BKT_STORE_KEY: STORE_KEY,
+  BKT_3D_GATE: GATE,
+  BKT_OK_URL: OK_BACK,
+  BKT_FAIL_URL: FAIL_BACK,
+  FRONT_OK,
+  FRONT_FAIL,
+} = process.env;
 
-function sha1Base64(s) {
-  const d = crypto.createHash("sha1").update(s, "utf8").digest();
-  return Buffer.from(d).toString("base64");
-}
+// ---------- HELPERS ----------
+const fixed2   = (n) => Number(n).toFixed(2);
+const sha1b64  = (s) => Buffer.from(crypto.createHash("sha1").update(s, "utf8").digest()).toString("base64");
+const trimSlash= (u) => (u || "").replace(/\/+$/,"");
 
+// ---------- INIT ----------
 r.post("/payments/init", async (req, res) => {
   try {
-    const {
-      BKT_CLIENT_ID: clientid,          // p.sh. 530061270
-      BKT_STORE_KEY: storekey,          // p.sh. SKEY3319
-      BKT_3D_GATE: gate,                // https://pgw.bkt-ks.com/fim/est3Dgate
-      BKT_OK_URL: OK_URL_BACK,          // p.sh. https://<backend>/api/payments/ok
-      BKT_FAIL_URL: FAIL_URL_BACK,      // p.sh. https://<backend>/api/payments/fail
-    } = process.env;
+    const { amount, email = "", meta = {} } = req.body || {};
+    if (!amount) return res.status(400).json({ error: "amount_required" });
 
-    // input nga fronti
-    const { amount, email, meta = {} } = req.body || {};
-
-    // vlera bazë
-    const oid = crypto.randomUUID().replace(/-/g, "").slice(0, 20); // max 20
-    const rnd = crypto.randomBytes(16).toString("hex");
-    const formattedAmount = formatAmount(amount ?? 0);
-
-    // TranType dhe Installment sipas kërkesës së bankës
+    const oid   = crypto.randomUUID().replace(/-/g, "").slice(0, 20);
+    const rnd   = crypto.randomBytes(16).toString("hex");
+    const amt   = fixed2(amount);
+    const okUrl = trimSlash(OK_BACK);
+    const failUrl = trimSlash(FAIL_BACK);
     const TranType = "Auth";
-    const Installment = ""; // bosh sipas emailit të bankës
+    const Installment = "";
 
-    // Këto URL DUHET të jenë fiks si në hash
-    const okUrl = OK_URL_BACK;
-    const failUrl = FAIL_URL_BACK;
+    const plain = CLIENT_ID + oid + amt + okUrl + failUrl + TranType + Installment + rnd + STORE_KEY;
+    const hash  = sha1b64(plain);
 
-    // rendi i ver3
-    const plain =
-      clientid +
-      oid +
-      formattedAmount +
-      okUrl +
-      failUrl +
-      TranType +
-      Installment +
-      rnd +
-      storekey;
-
-    const hash = sha1Base64(plain);
-
-    // fushat që do dërgohen në gateway (duhet të përputhen 1:1 me hash)
     const fields = {
-      clientid,            // kërkohet lower-case
-      oid,                 // order id
-      amount: formattedAmount,
-      okUrl: okUrl,
-      failUrl: failUrl,
-      TranType,            // "Auth"
-      Installment,         // bosh
-      rnd,                 // random
+      clientid: CLIENT_ID,
+      oid,
+      amount: amt,
+      okUrl,
+      failUrl,
+      TranType,
+      Installment,
+      rnd,
       storetype: "3D_PAY_HOSTING",
-      currency: "978",     // EUR
+      currency: "978",
       lang: "en",
-      email: email || "",
+      email,
       BillToName: `${meta.firstName || ""} ${meta.lastName || ""}`.trim(),
-      // ver3
       HashAlgorithm: "ver3",
-      hash,                // Base64(SHA1(...))
+      hash,
     };
 
-    // Ktheja frontit që të bëjë POST në gate me këto fusha
-    return res.json({ gate, fields, oid });
-  } catch (err) {
-    console.error(err);
+    return res.json({ gate: GATE, fields, oid });
+  } catch (e) {
+    console.error("init_failed", e);
     return res.status(500).json({ error: "init_failed" });
   }
+});
+
+// ---------- OK (POST + GET) ----------
+r.post("/payments/ok", urlencoded, (req, res) => {
+  const { oid = "", Response = "", mdStatus = "" } = req.body || {};
+  const to = new URL(trimSlash(FRONT_OK));
+  if (oid) to.searchParams.set("oid", oid);
+  if (Response) to.searchParams.set("resp", Response);
+  if (mdStatus) to.searchParams.set("md", mdStatus);
+  return res.redirect(303, to.toString());
+});
+
+r.get("/payments/ok", (req, res) => {
+  // nëse dikush e hap direkt në browser
+  const to = new URL(trimSlash(FRONT_OK));
+  if (req.query.oid) to.searchParams.set("oid", String(req.query.oid));
+  return res.redirect(303, to.toString());
+});
+
+// ---------- FAIL (POST + GET) ----------
+r.post("/payments/fail", urlencoded, (req, res) => {
+  const { oid = "", ErrMsg = "Payment failed", Response = "" } = req.body || {};
+  const to = new URL(trimSlash(FRONT_FAIL));
+  if (oid) to.searchParams.set("oid", oid);
+  to.searchParams.set("msg", ErrMsg || Response || "Payment failed");
+  return res.redirect(303, to.toString());
+});
+
+r.get("/payments/fail", (req, res) => {
+  // nëse bankë/tester bën GET ose e hap drejtpërdrejt
+  const to = new URL(trimSlash(FRONT_FAIL));
+  if (req.query.oid) to.searchParams.set("oid", String(req.query.oid));
+  to.searchParams.set("msg", String(req.query.msg || "Payment failed"));
+  return res.redirect(303, to.toString());
 });
 
 export default r;
