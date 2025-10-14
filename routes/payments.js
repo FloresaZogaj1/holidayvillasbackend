@@ -1,95 +1,116 @@
-import express from "express";
+import crypto from "crypto";
 import { Router } from "express";
 import { prisma } from "../db.js";
 
 const r = Router();
 
-/**
- * /api/payments/init
- * Pret: { amount, email, meta: { villa, from, to, nights, guests, name?, phone? } }
- * Kthen: HTML (simulim banke) që auto-redirect në /api/payments/mark-paid
- */
+function bktHash({ clientId, oid, amount, okUrl, failUrl, rnd, storeKey }) {
+  // Payten est: SHA1(clientId + oid + amount + okUrl + failUrl + rnd + storeKey) -> Base64
+  const plain = `${clientId}${oid}${amount}${okUrl}${failUrl}${rnd}${storeKey}`;
+  const sha1 = crypto.createHash("sha1").update(plain, "utf8").digest();
+  return Buffer.from(sha1).toString("base64");
+}
+
 r.post("/init", async (req, res) => {
   try {
-    const { amount, email, meta } = req.body || {};
-    const { villa, from, to, nights, guests, name, phone } = meta || {};
+    const {
+      BKT_CLIENT_ID: clientId,
+      BKT_STORE_KEY: storeKey,
+      BKT_3D_GATE: gate,
+      BKT_OK_URL: okUrl,
+      BKT_FAIL_URL: failUrl,
+    } = process.env;
 
+    const { amount, email, meta = {} } = req.body || {};
+    if (!amount || !email) return res.status(400).json({ error: "amount dhe email kërkohen" });
+
+    // Regjistro rezervimin si pending
     const booking = await prisma.booking.create({
       data: {
-        villaSlug: villa || "unknown",
-        name: name || email?.split("@")[0] || "Guest",
+        villaSlug: meta.villa || "unknown",
+        name: meta.customer?.firstName
+          ? `${meta.customer.firstName} ${meta.customer?.lastName || ""}`.trim()
+          : (email.split("@")[0] || "Guest"),
         email,
-        phone: phone || null,
-        checkIn: new Date(from),
-        checkOut: new Date(to),
-        guests: Number(guests || 1),
-        amount: Number(amount || 0),
-        status: "pending"
-      }
+        phone: meta.customer?.phone || null,
+        checkIn: meta.from ? new Date(meta.from) : null,
+        checkOut: meta.to ? new Date(meta.to) : null,
+        guests: Number(meta.guests || 1),
+        amount: Number(amount),
+        status: "pending",
+      },
     });
 
-    const html = `<!doctype html>
-<html lang="sq">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>HolidayVillas • Pagesa</title>
-<style>
-  body { font-family: ui-sans-serif, system-ui; background:#0f1412; color:#e6ede7; padding:24px; }
-  .card { max-width:560px; margin:32px auto; background:#121a16; border:1px solid #243026; border-radius:16px; padding:24px; }
-  .btn { display:inline-block; padding:12px 18px; border-radius:12px; border:1px solid #2e3a30; background:#afd185; color:#0d0f0e; font-weight:600; text-decoration:none; }
-  .muted { color:#a7b3aa }
-  .row { display:flex; justify-content:space-between; margin:8px 0; }
-</style>
-</head>
-<body>
-  <div class="card">
-    <h2>Konfirmo Pagesën</h2>
-    <p class="muted">Kjo është faqe simulimi e bankës. Pas klikimit, rezervimi shënohet si <strong>paid</strong>.</p>
-    <div class="row"><span>Vila</span><strong>${villa || "-"}</strong></div>
-    <div class="row"><span>Datat</span><strong>${from || "?"} → ${to || "?"} (${nights || "?"} net)</strong></div>
-    <div class="row"><span>Mysafirë</span><strong>${guests || 1}</strong></div>
-    <div class="row"><span>E-mail</span><strong>${email || "-"}</strong></div>
-    <div class="row"><span>Shuma</span><strong>€ ${Number(amount || 0).toFixed(2)}</strong></div>
+    // Fushat për 3D_PAY_HOSTING
+    const oid = booking.id.toString().padStart(18, "0"); // unik
+    const rnd = crypto.randomBytes(8).toString("hex");
+    const currency = "978";           // EUR
+    const storetype = "3D_PAY_HOSTING";
+    const lang = "sq";                // ose "en"
+    const TranType = "Auth";
+    const instalment = "";            // bosh kur s'ka këste
 
-    <form method="POST" action="/api/payments/mark-paid" style="margin-top:16px">
-      <input type="hidden" name="bookingId" value="${booking.id}" />
-      <button class="btn" type="submit">Paguaj (Simulim)</button>
-    </form>
+    // Hash sipas Payten (varianti i thjeshtë funksional)
+    const hash = bktHash({ clientId, oid, amount: Number(amount).toFixed(2), okUrl, failUrl, rnd, storeKey });
 
-    <p class="muted" style="margin-top:16px">Auto-konfirmim pas 1 sekonde…</p>
-  </div>
-  <script>
-    setTimeout(() => { const f=document.forms[0]; if(f){ f.submit(); } }, 1000);
-  </script>
-</body>
-</html>`;
+    const fields = {
+      clientid: clientId,
+      amount: Number(amount).toFixed(2),
+      oid,
+      okUrl,
+      failUrl,
+      rnd,
+      hash,
+      storetype,
+      currency,
+      lang,
+      email,
+      TranType,
+      instalment,
+      // Opsionale të dobishme:
+      BillToName: meta.customer?.firstName
+        ? `${meta.customer.firstName} ${meta.customer?.lastName || ""}`.trim()
+        : undefined,
+      BillToTel: meta.customer?.phone || undefined,
+      BillToEmail: email,
+      description: `Holiday Villas • ${meta.villaName || meta.villa || ""}`.trim(),
+    };
 
-    res.setHeader("Content-Type", "text/html; charset=utf-8");
-    res.status(200).send(html);
+    // Kthe JSON që front-i ta POST-ojë te BKT
+    res.json({ gate, fields });
   } catch (e) {
-    res.status(500).send(`<pre>${e.message}</pre>`);
+    console.error(e);
+    res.status(500).json({ error: "payment init failed" });
   }
 });
 
-r.post("/mark-paid", express.urlencoded({ extended: true }), async (req, res) => {
-  const bookingId = Number(req.body?.bookingId);
-  if (!bookingId) return res.status(400).send("bookingId mungon");
-  await prisma.booking.update({ where: { id: bookingId }, data: { status: "paid" } });
+// BKT do të rikthejë te këto URL; bëj redirect në frontend për UX
+r.post("/ok", async (req, res) => {
+  try {
+    const { FRONT_OK } = process.env;
+    const oid = (req.body?.oid || "").toString();
+    // shëno si paid në DB nëse dëshiron verifikim minimal
+    if (oid) {
+      const bookingId = Number(oid);
+      if (!Number.isNaN(bookingId)) {
+        await prisma.booking.update({ where: { id: bookingId }, data: { status: "paid" } });
+      }
+    }
+    return res.redirect(`${process.env.FRONT_OK}?oid=${encodeURIComponent(oid)}`);
+  } catch {
+    return res.redirect(process.env.FRONT_OK || "/");
+  }
+});
 
-  const html = `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Pagesa u krye</title>
-<style>body{font-family:ui-sans-serif,system-ui;background:#0f1412;color:#e6ede7;padding:24px} .card{max-width:560px;margin:32px auto;background:#121a16;border:1px solid #243026;border-radius:16px;padding:24px} .btn{display:inline-block;padding:10px 16px;border-radius:12px;border:1px solid #2e3a30;background:#afd185;color:#0d0f0e;font-weight:600;text-decoration:none}</style>
-</head><body>
-<div class="card">
-  <h2>✅ Pagesa u krye me sukses</h2>
-  <p>Rezervimi #${bookingId} u shënua si <strong>paid</strong>.</p>
-  <a class="btn" href="/">Kthehu te faqja kryesore</a>
-</div>
-</body></html>`;
-  res.setHeader("Content-Type", "text/html; charset=utf-8");
-  res.status(200).send(html);
+r.post("/fail", async (req, res) => {
+  try {
+    const { FRONT_FAIL } = process.env;
+    const oid = (req.body?.oid || "").toString();
+    const msg = (req.body?.ErrMsg || req.body?.errmsg || req.body?.Response || "Payment failed").toString();
+    return res.redirect(`${FRONT_FAIL}?oid=${encodeURIComponent(oid)}&msg=${encodeURIComponent(msg)}`);
+  } catch {
+    return res.redirect(process.env.FRONT_FAIL || "/");
+  }
 });
 
 export default r;
