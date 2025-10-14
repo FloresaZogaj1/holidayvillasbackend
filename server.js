@@ -167,5 +167,3 @@ app.post("/api/payments/fail", (req, res) => {
 });
 
 app.listen(PORT, () => console.log(`[payments] listening on :${PORT}`));
-app.post("/api/payments/ok",(req,res)=>{console.log("[BKT OK]",req.body); const {oid,ProcReturnCode,mdStatus}=req.body||{}; const ok=["1","2","3","4"].includes(String(mdStatus)) && String(ProcReturnCode)==="00"; return res.redirect(303, pushParamsIntoHash(FRONT_OK,{oid,ok: ok?"1":"0"}));});
-app.post("/api/payments/fail",(req,res)=>{console.log("[BKT FAIL]",req.body); const {oid,ErrMsg,Response}=req.body||{}; const msg=ErrMsg||Response||"Payment failed"; return res.redirect(303, pushParamsIntoHash(FRONT_FAIL,{oid,msg}));});

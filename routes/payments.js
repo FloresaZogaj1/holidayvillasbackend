@@ -66,26 +66,21 @@ r.post("/init", async (req, res) => {
 
     // Mos përfshi kurrë cvv2/pan/exp në HOSTING
     const fields = {
-      clientid: clientId,
-      amount: amountStr,
-      oid,
-      okUrl,
-      failUrl,
-      rnd,
-      hash,
-      storetype,
-      currency,
-      lang,
-      email,
-      TranType,
-      instalment,
-      BillToName: meta.customer?.firstName
-        ? `${meta.customer.firstName} ${meta.customer?.lastName || ""}`.trim()
-        : undefined,
-      BillToTel: meta.customer?.phone || undefined,
-      BillToEmail: email,
-      description: `Holiday Villas • ${meta.villaName || meta.villa || ""}`.trim(),
-    };
+  clientid: t(BKT_CLIENT_ID),
+  oid: t(oid),
+  amount: t(AMOUNT),
+  okUrl: t(BKT_OK_URL),
+  failUrl: t(BKT_FAIL_URL),
+  TranType: "Auth",
+  instalment: "",
+  currency: t(BKT_CURRENCY),         // "978"
+  rnd: t(RND),
+  storetype: "3D_PAY_HOSTING",
+  hash,                               // Base64(SHA1 ver2)
+  hashAlgorithm: "ver2",              // <<< SHTO KËTË
+  encoding: "UTF-8",
+  lang: "en",
+};
 
     // Kthe JSON për auto-POST në bankë
     return res.json({ gate, fields });
