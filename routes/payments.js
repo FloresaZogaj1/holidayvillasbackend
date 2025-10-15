@@ -1,18 +1,21 @@
 
+
 import { Router } from "express";
 import crypto from "crypto";
 const r = Router();
 
-// BKT 3D Pay merchant info
-const CLIENT_ID = "530061270";
-const STORE_KEY = "SKEY3319";
-const GATE_URL = "https://pgw.bkt-ks.com/fim/est3Dgate";
-const OK_URL = "https://holidayvillasbackend.onrender.com/api/payments/ok";
-const FAIL_URL = "https://holidayvillasbackend.onrender.com/api/payments/fail";
+// Use environment variables for all config
+const CLIENT_ID = process.env.BKT_CLIENT_ID;
+const STORE_KEY = process.env.BKT_STORE_KEY;
+const GATE_URL = process.env.BKT_3D_GATE;
+const OK_URL = process.env.BKT_OK_URL;
+const FAIL_URL = process.env.BKT_FAIL_URL;
+const FRONT_OK = process.env.FRONT_OK;
+const FRONT_FAIL = process.env.FRONT_FAIL;
 
 r.post("/init", async (req, res) => {
   try {
-    const { amount, email = "" } = req.body || {};
+    const { amount, email = "", meta = {} } = req.body || {};
     if (!amount) return res.status(400).json({ error: "amount_required" });
 
     const oid = crypto.randomUUID().replace(/-/g, "").slice(0, 20);
@@ -40,6 +43,8 @@ r.post("/init", async (req, res) => {
       email,
       HashAlgorithm: "ver3",
       hash,
+      encoding: "UTF-8",
+      ...meta,
     };
 
     return res.json({ gate: GATE_URL, fields, oid });
@@ -48,10 +53,6 @@ r.post("/init", async (req, res) => {
     return res.status(500).json({ error: "init_failed" });
   }
 });
-
-// Frontend redirect URLs
-const FRONT_OK   = "https://holidayvillasks.com/#/payment/success";
-const FRONT_FAIL = "https://holidayvillasks.com/#/payment/fail";
 
 r.get("/ok", (req, res) => {
   const oid = req.query?.oid || req.query?.OrderId || "";
