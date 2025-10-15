@@ -1,4 +1,6 @@
+import { Router } from "express";
 import crypto from "crypto";
+const r = Router();
 
 const CLIENT_ID = process.env.BKT_CLIENT_ID;
 const STORE_KEY = process.env.BKT_STORE_KEY;
@@ -44,11 +46,7 @@ r.post("/init", async (req, res) => {
     return res.status(500).json({ error: "init_failed" });
   }
 });
-// backend/routes/payments.js
-import { Router } from "express";
-const r = Router();
 
-// routes/payments.js
 const FRONT_OK   = process.env.FRONT_OK   || "https://holidayvillasks.com/#/payment/success";
 const FRONT_FAIL = process.env.FRONT_FAIL || "https://holidayvillasks.com/#/payment/fail";
 
