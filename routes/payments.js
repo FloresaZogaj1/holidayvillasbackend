@@ -1,12 +1,14 @@
+
 import { Router } from "express";
 import crypto from "crypto";
 const r = Router();
 
-const CLIENT_ID = process.env.BKT_CLIENT_ID;
-const STORE_KEY = process.env.BKT_STORE_KEY;
-const GATE_URL = process.env.BKT_3D_GATE;
-const OK_URL = process.env.BKT_OK_URL;
-const FAIL_URL = process.env.BKT_FAIL_URL;
+// BKT 3D Pay merchant info
+const CLIENT_ID = "530061270";
+const STORE_KEY = "SKEY3319";
+const GATE_URL = "https://pgw.bkt-ks.com/fim/est3Dgate";
+const OK_URL = "https://holidayvillasbackend.onrender.com/api/payments/ok";
+const FAIL_URL = "https://holidayvillasbackend.onrender.com/api/payments/fail";
 
 r.post("/init", async (req, res) => {
   try {
@@ -47,8 +49,9 @@ r.post("/init", async (req, res) => {
   }
 });
 
-const FRONT_OK   = process.env.FRONT_OK   || "https://holidayvillasks.com/#/payment/success";
-const FRONT_FAIL = process.env.FRONT_FAIL || "https://holidayvillasks.com/#/payment/fail";
+// Frontend redirect URLs
+const FRONT_OK   = "https://holidayvillasks.com/#/payment/success";
+const FRONT_FAIL = "https://holidayvillasks.com/#/payment/fail";
 
 r.get("/ok", (req, res) => {
   const oid = req.query?.oid || req.query?.OrderId || "";
@@ -62,6 +65,5 @@ r.get("/fail", (req, res) => {
   const target = `${FRONT_FAIL}${FRONT_FAIL.includes("?") ? "&" : "?"}oid=${encodeURIComponent(oid)}&msg=${encodeURIComponent(msg)}`;
   return res.redirect(302, target);
 });
-
 
 export default r;
