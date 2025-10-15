@@ -18,12 +18,21 @@ const BKT_FAIL_URL  = process.env.BKT_FAIL_URL;
 // ---------- MID ----------
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(express.json());
-app.use(cors({
-  origin: (o, cb) => !o || ["https://holidayvillasks.com","https://www.holidayvillasks.com"].includes(o) ? cb(null,true) : cb(new Error("CORS "+o)),
-  methods: ["GET","POST","OPTIONS"],
-  allowedHeaders: ["Content-Type"],
-  credentials: false, maxAge: 600,
-}));
+// BKT zakonisht POST-on application/x-www-form-urlencoded
+app.use(express.urlencoded({ extended: false }));
+
+app.use(
+  cors({
+    origin: (o, cb) =>
+      !o || ["https://holidayvillasks.com","https://www.holidayvillasks.com"].includes(o)
+        ? cb(null, true)
+        : cb(new Error("CORS " + o)),
+    methods: ["GET","POST","OPTIONS"],
+    allowedHeaders: ["Content-Type"],
+    credentials: false,
+    maxAge: 600,
+  })
+);
 app.options("*", cors());
 
 // ---------- HEALTH ----------
@@ -39,12 +48,15 @@ function hashV3(f){
 // ---------- PAYMENTS ----------
 const r = express.Router();
 
-r.get("/ping", (_req,res)=>res.json({ up:true })); // debug
+r.get("/ping", (_req,res)=>res.json({ up:true }));
 
 r.post("/init", (req,res)=>{
-  if (!BKT_CLIENT_ID || !BKT_STORE_KEY || !BKT_OK_URL || !BKT_FAIL_URL) return res.status(500).json({ error:"Missing BKT env" });
+  if (!BKT_CLIENT_ID || !BKT_STORE_KEY || !BKT_OK_URL || !BKT_FAIL_URL)
+    return res.status(500).json({ error:"Missing BKT env" });
+
   const amount = String(Number(req.body?.amount ?? 0).toFixed(2));
   if (amount === "0.00") return res.status(400).json({ error:"Invalid amount" });
+
   const email = String(req.body?.email ?? "");
   const fields = {
     clientid: String(BKT_CLIENT_ID),
@@ -66,15 +78,22 @@ r.post("/init", (req,res)=>{
   res.json({ gate: BKT_3D_GATE, fields });
 });
 
-r.get("/ok", (req,res)=>{
-  const oid = req.query?.oid || req.query?.OrderId || "";
-  res.redirect(302, `${FRONT_OK}${FRONT_OK.includes("?")?"&":"?"}oid=${encodeURIComponent(oid)}`);
+// Prano GET dhe POST nga gateway
+r.all("/ok", (req, res) => {
+  const p = { ...req.query, ...req.body };
+  const oid = p.oid || p.OrderId || "";
+  const target = `${FRONT_OK}${FRONT_OK.includes("?") ? "&" : "?"}oid=${encodeURIComponent(oid)}`;
+  return res.redirect(302, target);
 });
 
-r.get("/fail", (req,res)=>{
-  const oid = req.query?.oid || req.query?.OrderId || "";
-  const msg = req.query?.msg || req.query?.ErrMsg || req.query?.Response || "Payment failed";
-  res.redirect(302, `${FRONT_FAIL}${FRONT_FAIL.includes("?")?"&":"?"}oid=${encodeURIComponent(oid)}&msg=${encodeURIComponent(msg)}`);
+r.all("/fail", (req, res) => {
+  const p = { ...req.query, ...req.body };
+  const oid = p.oid || p.OrderId || "";
+  const msg = p.msg || p.ErrMsg || p.Response || "Payment failed";
+  const target =
+    `${FRONT_FAIL}${FRONT_FAIL.includes("?") ? "&" : "?"}` +
+    `oid=${encodeURIComponent(oid)}&msg=${encodeURIComponent(msg)}`;
+  return res.redirect(302, target);
 });
 
 app.use("/api/payments", r);
