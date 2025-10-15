@@ -1,31 +1,84 @@
+// server.js  (ESM)
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import crypto from "crypto";
 
 const app = express();
 
-const ALLOWED_ORIGINS = [
-  "https://holidayvillasks.com",
-  "https://www.holidayvillasks.com",
-];
+// ---------- ENV ----------
+const FRONT_OK   = process.env.FRONT_OK   || "https://holidayvillasks.com/#/payment/success";
+const FRONT_FAIL = process.env.FRONT_FAIL || "https://holidayvillasks.com/#/payment/fail";
+const BKT_CLIENT_ID = process.env.BKT_CLIENT_ID;
+const BKT_STORE_KEY = process.env.BKT_STORE_KEY;
+const BKT_3D_GATE   = process.env.BKT_3D_GATE || "https://pgw.bkt-ks.com/fim/est3Dgate";
+const BKT_OK_URL    = process.env.BKT_OK_URL;
+const BKT_FAIL_URL  = process.env.BKT_FAIL_URL;
 
+// ---------- MID ----------
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(express.json());
-
-// CORS i ngushtë
-app.use(
-  cors({
-    origin: (origin, cb) => {
-      if (!origin) return cb(null, true);              // lejo POST nga curl/Render
-      if (ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
-      return cb(new Error("CORS blocked: " + origin));
-    },
-    methods: ["GET", "POST", "OPTIONS"],
-    allowedHeaders: ["Content-Type"],
-    credentials: false,
-    maxAge: 600,
-  })
-);
-
-// Preflight
+app.use(cors({
+  origin: (o, cb) => !o || ["https://holidayvillasks.com","https://www.holidayvillasks.com"].includes(o) ? cb(null,true) : cb(new Error("CORS "+o)),
+  methods: ["GET","POST","OPTIONS"],
+  allowedHeaders: ["Content-Type"],
+  credentials: false, maxAge: 600,
+}));
 app.options("*", cors());
+
+// ---------- HEALTH ----------
+app.get("/health", (_req,res)=>res.status(200).json({ ok:true }));
+
+// ---------- HELPERS ----------
+function hashV3(f){
+  const plain = `${f.clientid}${f.oid}${f.amount}${f.okUrl}${f.failUrl}${f.TranType}${f.Installment}${f.rnd}${BKT_STORE_KEY}`;
+  const sha1 = crypto.createHash("sha1").update(plain,"utf8").digest();
+  return Buffer.from(sha1).toString("base64");
+}
+
+// ---------- PAYMENTS ----------
+const r = express.Router();
+
+r.get("/ping", (_req,res)=>res.json({ up:true })); // debug
+
+r.post("/init", (req,res)=>{
+  if (!BKT_CLIENT_ID || !BKT_STORE_KEY || !BKT_OK_URL || !BKT_FAIL_URL) return res.status(500).json({ error:"Missing BKT env" });
+  const amount = String(Number(req.body?.amount ?? 0).toFixed(2));
+  if (amount === "0.00") return res.status(400).json({ error:"Invalid amount" });
+  const email = String(req.body?.email ?? "");
+  const fields = {
+    clientid: String(BKT_CLIENT_ID),
+    oid: crypto.randomBytes(10).toString("hex"),
+    amount,
+    okUrl: BKT_OK_URL,
+    failUrl: BKT_FAIL_URL,
+    TranType: "Auth",
+    Installment: "",
+    storetype: "3D_PAY_HOSTING",
+    currency: "978",
+    lang: "en",
+    email,
+    BillToName: "",
+    HashAlgorithm: "ver3",
+    rnd: crypto.randomBytes(16).toString("hex"),
+  };
+  fields.hash = hashV3(fields);
+  res.json({ gate: BKT_3D_GATE, fields });
+});
+
+r.get("/ok", (req,res)=>{
+  const oid = req.query?.oid || req.query?.OrderId || "";
+  res.redirect(302, `${FRONT_OK}${FRONT_OK.includes("?")?"&":"?"}oid=${encodeURIComponent(oid)}`);
+});
+
+r.get("/fail", (req,res)=>{
+  const oid = req.query?.oid || req.query?.OrderId || "";
+  const msg = req.query?.msg || req.query?.ErrMsg || req.query?.Response || "Payment failed";
+  res.redirect(302, `${FRONT_FAIL}${FRONT_FAIL.includes("?")?"&":"?"}oid=${encodeURIComponent(oid)}&msg=${encodeURIComponent(msg)}`);
+});
+
+app.use("/api/payments", r);
+
+// ---------- START ----------
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, "0.0.0.0", ()=>console.log("API up on", PORT));
