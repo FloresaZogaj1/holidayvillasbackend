@@ -103,7 +103,8 @@ r.all("/ok", (req, res) => {
 r.all("/fail", (req, res) => {
   try {
     const p = { ...req.query, ...req.body };
-    const oid = p.oid || p.OrderId || "";
+    // Vendos vlera default nëse mungojnë
+    const oid = p.oid || p.OrderId || "unknown";
     const msg = p.msg || p.ErrMsg || p.Response || "Payment failed";
     const target =
       `${FRONT_FAIL}${FRONT_FAIL.includes("?") ? "&" : "?"}` +
@@ -111,7 +112,9 @@ r.all("/fail", (req, res) => {
     return res.redirect(302, target);
   } catch (err) {
     console.error("/fail error", err);
-    res.status(500).json({ error: "fail_route_error", details: err?.message });
+    // Edhe në rast gabimi, bëj redirect me vlera default
+    const target = `${FRONT_FAIL}${FRONT_FAIL.includes("?") ? "&" : "?"}oid=unknown&msg=Payment failed`;
+    return res.redirect(302, target);
   }
 });
 
