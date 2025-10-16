@@ -1,3 +1,14 @@
+// Debug/handle route for inspecting incoming payment requests
+r.post("/handle", async (req, res) => {
+  try {
+    console.log("/handle called", req.body);
+    // You can log, save, or inspect the incoming data here
+    return res.json({ ok: true, received: req.body });
+  } catch (e) {
+    console.error("handle_failed", e);
+    return res.status(500).json({ error: "handle_failed" });
+  }
+});
 
 
 import { Router } from "express";
