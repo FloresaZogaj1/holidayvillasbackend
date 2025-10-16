@@ -73,27 +73,48 @@ paymentsRouter.post("/init", async (req, res) => {
       const oid = crypto.randomUUID().replace(/-/g, "").slice(0, 20);
       const rnd = crypto.randomBytes(16).toString("hex");
       const amt = Number(amount).toFixed(2);
+      const BillToName = ""; // You can fill this if you want
       const TranType = "Auth";
       const Installment = "";
+      const storetype = "3D_PAY_HOSTING";
+      const currency = "978";
+      const lang = "en";
+      const HashAlgorithm = "ver3";
 
-      // Hash calculation as per BKT 3D Pay requirements
-      const plain = CLIENT_ID + oid + amt + OK_URL + FAIL_URL + TranType + Installment + rnd + STORE_KEY;
+      // Hash string in exact order required by BKT
+      const plain =
+        amt +
+        BillToName +
+        CLIENT_ID +
+        currency +
+        email +
+        FAIL_URL +
+        HashAlgorithm +
+        Installment +
+        lang +
+        oid +
+        OK_URL +
+        rnd +
+        storetype +
+        TranType +
+        STORE_KEY;
       const hash = crypto.createHash("sha1").update(plain, "utf8").digest("base64");
 
       const fields = {
-        clientid: CLIENT_ID,
-        oid,
         amount: amt,
-        okUrl: OK_URL,
-        failUrl: FAIL_URL,
-        TranType,
-        Installment,
-        rnd,
-        storetype: "3D_PAY_HOSTING",
-        currency: "978",
-        lang: "en",
+        BillToName,
+        clientid: CLIENT_ID,
+        currency,
         email,
-        HashAlgorithm: "ver3",
+        failUrl: FAIL_URL,
+        HashAlgorithm,
+        Installment,
+        lang,
+        oid,
+        okUrl: OK_URL,
+        rnd,
+        storetype,
+        TranType,
         hash,
       };
 
