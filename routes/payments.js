@@ -1,3 +1,8 @@
+// Custom redirect route for flexible client redirection
+r.get("/redirect", (req, res) => {
+  const target = req.query?.url || process.env.FRONT_OK;
+  return res.redirect(302, target);
+});
 // Debug/handle route for inspecting incoming payment requests
 r.post("/handle", async (req, res) => {
   try {
@@ -19,10 +24,19 @@ const r = Router();
 const CLIENT_ID = process.env.BKT_CLIENT_ID;
 const STORE_KEY = process.env.BKT_STORE_KEY;
 const GATE_URL = process.env.BKT_3D_GATE;
-const OK_URL = process.env.BKT_OK_URL;
-const FAIL_URL = process.env.BKT_FAIL_URL;
-const FRONT_OK = process.env.FRONT_OK;
-const FRONT_FAIL = process.env.FRONT_FAIL;
+const isLocal = process.env.NODE_ENV !== "production";
+const OK_URL = isLocal
+  ? "http://localhost:4000/api/payments/ok"
+  : process.env.BKT_OK_URL;
+const FAIL_URL = isLocal
+  ? "http://localhost:4000/api/payments/fail"
+  : process.env.BKT_FAIL_URL;
+const FRONT_OK = isLocal
+  ? "http://localhost:5173/#/payment/success"
+  : process.env.FRONT_OK;
+const FRONT_FAIL = isLocal
+  ? "http://localhost:5173/#/payment/fail"
+  : process.env.FRONT_FAIL;
 
 r.post("/init", async (req, res) => {
   try {
@@ -67,14 +81,20 @@ r.post("/init", async (req, res) => {
 
 r.get("/ok", (req, res) => {
   const oid = req.query?.oid || req.query?.OrderId || "";
-  const target = `${FRONT_OK}${FRONT_OK.includes("?") ? "&" : "?"}oid=${encodeURIComponent(oid)}`;
+  const customUrl = req.query?.redirect;
+  const target = customUrl
+    ? `${customUrl}${customUrl.includes("?") ? "&" : "?"}oid=${encodeURIComponent(oid)}`
+    : `${FRONT_OK}${FRONT_OK.includes("?") ? "&" : "?"}oid=${encodeURIComponent(oid)}`;
   return res.redirect(302, target);
 });
 
 r.get("/fail", (req, res) => {
   const oid = req.query?.oid || req.query?.OrderId || "";
   const msg = req.query?.msg || req.query?.ErrMsg || req.query?.Response || "Payment failed";
-  const target = `${FRONT_FAIL}${FRONT_FAIL.includes("?") ? "&" : "?"}oid=${encodeURIComponent(oid)}&msg=${encodeURIComponent(msg)}`;
+  const customUrl = req.query?.redirect;
+  const target = customUrl
+    ? `${customUrl}${customUrl.includes("?") ? "&" : "?"}oid=${encodeURIComponent(oid)}&msg=${encodeURIComponent(msg)}`
+    : `${FRONT_FAIL}${FRONT_FAIL.includes("?") ? "&" : "?"}oid=${encodeURIComponent(oid)}&msg=${encodeURIComponent(msg)}`;
   return res.redirect(302, target);
 });
 
