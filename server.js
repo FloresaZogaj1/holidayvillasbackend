@@ -53,7 +53,8 @@ app.get("/health", (_req,res)=>res.status(200).json({ ok:true }));
 
 // ---------- HELPERS ----------
 function hashV3(f){
-  const plain = `${f.clientid}${f.oid}${f.amount}${f.okUrl}${f.failUrl}${f.TranType}${f.Installment}${f.rnd}${BKT_STORE_KEY}`;
+  // Hash string sipas udhëzimit të BKT
+  const plain = `${f.amount}${f.BillToName}${f.clientid}${f.currency}${f.email}${f.failUrl}${f.HashAlgorithm}${f.Installment}${f.lang}${f.oid}${f.okUrl}${f.rnd}${f.storetype}${f.TranType}${BKT_STORE_KEY}`;
   const sha1 = crypto.createHash("sha1").update(plain,"utf8").digest();
   return Buffer.from(sha1).toString("base64");
 }
@@ -78,12 +79,12 @@ r.post("/init", (req,res)=>{
     okUrl: BKT_OK_URL,
     failUrl: BKT_FAIL_URL,
     TranType: "Auth",
-    Installment: "",
+    Installment: "1", // vlerë default
     storetype: "3D_PAY_HOSTING",
     currency: "978",
     lang: "en",
     email,
-    BillToName: "",
+    BillToName: "Holiday Villas", // vlerë default
     HashAlgorithm: "ver3",
     rnd: crypto.randomBytes(16).toString("hex"),
   };
