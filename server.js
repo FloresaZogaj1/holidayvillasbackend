@@ -48,29 +48,55 @@ app.options("/api/*", apiCors);
 app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
 
 // ---------- HASH HELPERS ----------
-function hashV3(fields) {
-  // Rendi saktë sipas dokumentit të BKT:
-  // amount|BillToName|clientid|currency|email|failUrl|HashAlgorithm|Installment|lang|oid|okUrl|rnd|storetype|TranType|Storekey
-  const plain =
-    `${fields.amount}` +
-    `${fields.BillToName}` +
-    `${fields.clientid}` +
-    `${fields.currency}` +
-    `${fields.email}` +
-    `${fields.failUrl}` +
-    `${fields.HashAlgorithm}` +
-    `${fields.Installment}` +
-    `${fields.lang}` +
-    `${fields.oid}` +
-    `${fields.okUrl}` +
-    `${fields.rnd}` +
-    `${fields.storetype}` +
-    `${fields.TranType}` +
-    `${BKT_STORE_KEY}`;
-
-  const sha1 = crypto.createHash("sha1").update(plain, "utf8").digest();
-  return Buffer.from(sha1).toString("base64");
+function hashV3(fields, storeKey) {
+  const ordered = [
+    fields.amount,
+    fields.BillToName,
+    fields.clientid,
+    fields.currency,
+    fields.email,
+    fields.failUrl,
+    fields.HashAlgorithm,  // "ver3"
+    fields.Installment,    // "" but must be present
+    fields.lang,
+    fields.oid,
+    fields.okUrl,
+    fields.rnd,
+    fields.storetype,
+    fields.TranType,
+    storeKey,
+  ];
+  const plain = ordered.join("|");
+  // ver3 commonly uses SHA512 then Base64
+  const digest = crypto.createHash("sha512").update(plain, "utf8").digest();
+  return Buffer.from(digest).toString("base64");
 }
+
+// ---------- HASH HELPERS ----------
+function buildHashV3_SHA512(fields, storeKey) {
+  // Order per Payten ver3 doc
+  const ordered = [
+    fields.amount,        // with 2 decimals
+    fields.BillToName,    // avoid non-ASCII for now
+    fields.clientid,
+    fields.currency,
+    fields.email,
+    fields.failUrl,
+    fields.HashAlgorithm, // "ver3"
+    fields.Installment,   // empty string but present
+    fields.lang,
+    fields.oid,
+    fields.okUrl,
+    fields.rnd,
+    fields.storetype,     // KEEP EXACT CASE you send: "3D_PAY_HOSTING"
+    fields.TranType,
+    storeKey,
+  ];
+  const plain = ordered.join("|");
+  const digest = crypto.createHash("sha512").update(plain, "utf8").digest();
+  return { hash: Buffer.from(digest).toString("base64"), plain };
+}
+
 
 // ---------- PAYMENTS ----------
 const r = express.Router();
@@ -90,24 +116,30 @@ r.post("/init", apiCors, (req, res) => {
     clientid: String(BKT_CLIENT_ID),
     oid: crypto.randomBytes(10).toString("hex"),
     amount,
-    okUrl: BKT_OK_URL,
-    failUrl: BKT_FAIL_URL,
+    okUrl: BKT_OK_URL,     // must match whitelisted exactly
+    failUrl: BKT_FAIL_URL, // must match whitelisted exactly
     TranType: "Auth",
-    Installment: "", // bosh, por përfshihet në hash
-    storetype: "3D_PAY_HOSTING",
+    Installment: "",
+    storetype: "3D_PAY_HOSTING", // match your terminal config
     currency: "978",
     lang: "en",
     email,
-    BillToName: "Holiday Villas", // mund të jetë bosh ose me vlerë
+    BillToName: "Holiday Villas",
     HashAlgorithm: "ver3",
+    encoding: "UTF-8",     // REQUIRED by Payten email
     rnd: crypto.randomBytes(16).toString("hex"),
   };
 
-  console.log(fields);
+  const { hash, plain } = buildHashV3_SHA512(fields, BKT_STORE_KEY);
+  fields.hash = hash;
 
-  fields.hash = hashV3(fields);
+  // Debug: verify what you hash == what you send
+  console.log("HASH_PLAIN_VER3:", plain);
+  console.log("FIELDS_TO_GATE:", fields);
+
   return res.json({ gate: BKT_3D_GATE, fields });
 });
+
 
 // ---------------- OK / FAIL ----------------
 // Këto rrugë pranojnë POST nga banka => asnjë CORS
