@@ -171,9 +171,17 @@ r.all("/fail", (req, res) => {
 
 app.use("/api/payments", r);
 
+// ---------- CONTACT ----------
+import contactRouter from "./routes/contact.js";
+app.use("/api/contact", apiCors, contactRouter);
+
+// ---------- AVAILABILITY ----------
+import availabilityRouter from "./routes/availability.js";
+app.use("/api/availability", apiCors, availabilityRouter);
+
 // ---------- ADMIN ----------
 import adminRouter from "./routes/admin.js";
-app.use("/api/admin", adminRouter);
+app.use("/api/admin", apiCors, adminRouter);
 
 // ---------- START ----------
 const PORT = process.env.PORT || 4000;
