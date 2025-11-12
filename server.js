@@ -4,6 +4,7 @@ import cors from "cors";
 import helmet from "helmet";
 import crypto from "crypto";
 import dotenv from "dotenv";
+import villasRouter from "./routes/villas.js";
 dotenv.config();
 
 const app = express();
@@ -22,6 +23,7 @@ const BKT_FAIL_URL  = process.env.BKT_FAIL_URL;
 app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: false }));
+
 
 // CORS vetëm për API që thirret nga frontend-i
 const apiCors = cors({
@@ -43,6 +45,7 @@ const apiCors = cors({
 });
 
 app.options("/api/*", apiCors);
+app.use("/api/admin", apiCors, villasRouter);
 
 // ---------- HEALTH ----------
 app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
@@ -178,6 +181,10 @@ app.use("/api/contact", apiCors, contactRouter);
 // ---------- AVAILABILITY ----------
 import availabilityRouter from "./routes/availability.js";
 app.use("/api/availability", apiCors, availabilityRouter);
+
+// ---------- CHANNELS ----------
+import channelsRouter from "./routes/channels.js";
+app.use("/api/channels", apiCors, channelsRouter);
 
 // ---------- ADMIN ----------
 import adminRouter from "./routes/admin.js";
