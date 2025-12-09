@@ -56,6 +56,31 @@ r.post("/", async (req, res) => {
         html,
         replyTo: email,
       });
+
+      // Dërgo email konfirmimi edhe te klienti
+      const clientSubject = `Rezervimi juaj u pranua - ${villaSlug}`;
+      const clientHTML = `
+        <h2>Përshëndetje ${name},</h2>
+        <p>Faleminderit për rezervimin tuaj në <strong>Holiday Villas</strong>. Rezervimi u regjistrua me sukses.</p>
+        <p>Brenda pak kohe, dikush nga stafi ynë do t'ju kontaktojë për detaje të mëtejshme.</p>
+        <h3>Detajet e rezervimit</h3>
+        <p><strong>Villa:</strong> ${villaSlug}</p>
+        <p><strong>Check In:</strong> ${new Date(from).toLocaleString("sq-AL")}</p>
+        <p><strong>Check Out:</strong> ${new Date(to).toLocaleString("sq-AL")}</p>
+        <p><strong>Mysafirë:</strong> ${guests}</p>
+        <p><strong>Shuma totale:</strong> €${Number(amount).toFixed(2)}</p>
+        <hr/>
+        <p>Nëse keni pyetje, mund të përgjigjeni direkt në këtë email.</p>
+        <p>— Holiday Villas</p>
+      `;
+
+      await transporter.sendMail({
+        from: process.env.EMAIL_USER || "holidayvillas.ks@gmail.com",
+        to: email,
+        subject: clientSubject,
+        html: clientHTML,
+        replyTo: process.env.EMAIL_USER || "holidayvillas.ks@gmail.com",
+      });
     } catch (mailErr) {
       // Mos e prish përgjigjen për klientin nëse email dështon
       console.error("Booking email error:", mailErr?.message || mailErr);
