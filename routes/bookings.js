@@ -97,6 +97,16 @@ r.post("/", async (req, res) => {
   }
 });
 
+// Endpoint to check if bookings are currently allowed
+r.get("/available", (_req, res) => {
+  const blockUntil = new Date("2026-01-05T00:00:00.000Z");
+  const now = new Date();
+  if (now < blockUntil) {
+    return res.status(200).json({ ok: false, error: "Rezervimet janë të mbyllura deri më 5 Janar 2026." });
+  }
+  res.json({ ok: true });
+});
+
 r.get("/", async (_req, res) => {
   const list = await prisma.booking.findMany({ orderBy: { id: "desc" }, take: 100 });
   res.json({ ok: true, list });
