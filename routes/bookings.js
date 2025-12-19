@@ -6,12 +6,6 @@ const r = Router();
 
 r.post("/", async (req, res) => {
   try {
-    // Temporary block: disallow new bookings until 2026-01-05
-    const blockUntil = new Date("2026-01-05T00:00:00.000Z");
-    const now = new Date();
-    if (now < blockUntil) {
-      return res.status(403).json({ ok: false, error: "Rezervimet janë të mbyllura deri më 5 Janar 2026." });
-    }
     const { villaSlug, name, email, phone, from, to, guests, amount } = req.body;
     if (!villaSlug || !name || !email || !from || !to || !guests || !amount) {
       return res.status(400).json({ ok: false, error: "Fusha të pavlefshme" });
@@ -97,15 +91,7 @@ r.post("/", async (req, res) => {
   }
 });
 
-// Endpoint to check if bookings are currently allowed
-r.get("/available", (_req, res) => {
-  const blockUntil = new Date("2026-01-05T00:00:00.000Z");
-  const now = new Date();
-  if (now < blockUntil) {
-    return res.status(200).json({ ok: false, error: "Rezervimet janë të mbyllura deri më 5 Janar 2026." });
-  }
-  res.json({ ok: true });
-});
+// (Temporary /available endpoint removed)
 
 r.get("/", async (_req, res) => {
   const list = await prisma.booking.findMany({ orderBy: { id: "desc" }, take: 100 });
