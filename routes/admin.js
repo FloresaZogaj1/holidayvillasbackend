@@ -56,6 +56,79 @@ router.post('/login', async (req, res) => {
 // Apply admin auth to all routes below
 router.use(adminAuth);
 
+// Simple ping for admin UI to verify token
+router.get('/ping', async (req, res) => {
+  try {
+    return res.json({ ok: true, user: req.user });
+  } catch (err) {
+    return res.status(500).json({ error: 'Ping failed' });
+  }
+});
+
+// Export bookings as CSV
+router.get('/bookings/export', async (req, res) => {
+  try {
+    const rows = await prisma.booking.findMany({
+      include: { villa: { select: { name: true, slug: true, type: true } } },
+      orderBy: { id: 'desc' }
+    });
+
+    const header = [
+      'id','villaSlug','villaName','name','email','phone','checkIn','checkOut','guests','amount','status','source','createdAt'
+    ];
+
+    const csv = [header.join(',')].concat(rows.map(r => {
+      const cols = [
+        r.id,
+        `"${(r.villaSlug || '')}"`,
+        `"${(r.villa?.name || '')}"`,
+        `"${(r.name || '')}"`,
+        `"${(r.email || '')}"`,
+        `"${(r.phone || '')}"`,
+        r.checkIn ? r.checkIn.toISOString() : '',
+        r.checkOut ? r.checkOut.toISOString() : '',
+        r.guests,
+        r.amount ? r.amount.toString() : '',
+        r.status,
+        r.source,
+        r.createdAt ? r.createdAt.toISOString() : ''
+      ];
+      return cols.join(',');
+    })).join('\n');
+
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="bookings.csv"');
+    return res.send(csv);
+  } catch (err) {
+    console.error('Export bookings error', err);
+    return res.status(500).json({ error: 'Failed to export bookings' });
+  }
+});
+
+// Bulk bookings action: { ids: [1,2], action: 'delete' } or { ids, action: 'status', status: 'paid' }
+router.post('/bookings/bulk', async (req, res) => {
+  try {
+    const { ids, action, status } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'No ids provided' });
+
+    if (action === 'delete') {
+      const deleted = await prisma.booking.deleteMany({ where: { id: { in: ids } } });
+      return res.json({ ok: true, deleted: deleted.count });
+    }
+
+    if (action === 'status') {
+      if (!status) return res.status(400).json({ error: 'No status provided' });
+      const updated = await prisma.booking.updateMany({ where: { id: { in: ids } }, data: { status } });
+      return res.json({ ok: true, updated: updated.count });
+    }
+
+    return res.status(400).json({ error: 'Unknown action' });
+  } catch (err) {
+    console.error('Bulk bookings error', err);
+    return res.status(500).json({ error: 'Bulk action failed' });
+  }
+});
+
 // --- Villa CRUD ---
 router.get('/villas', async (req, res) => {
   try {
@@ -105,21 +178,46 @@ router.delete('/villas/:id', async (req, res) => {
 // --- Booking CRUD ---
 router.get('/bookings', async (req, res) => {
   try {
+    const { from, to, status, villa, q } = req.query;
+
+    const where = {};
+
+    if (status) where.status = status;
+    if (villa) where.villaSlug = villa;
+
+    if (from || to) {
+      where.AND = [];
+      if (from) {
+        const fromDate = new Date(from);
+        if (!isNaN(fromDate)) where.AND.push({ checkIn: { gte: fromDate } });
+      }
+      if (to) {
+        const toDate = new Date(to);
+        if (!isNaN(toDate)) where.AND.push({ checkOut: { lte: toDate } });
+      }
+      if (where.AND.length === 0) delete where.AND;
+    }
+
+    if (q) {
+      where.OR = [
+        { name: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
     const bookings = await prisma.booking.findMany({
+      where,
       include: {
         villa: {
-          select: {
-            id: true,
-            name: true,
-            slug: true,
-            type: true
-          }
+          select: { id: true, name: true, slug: true, type: true }
         }
       },
       orderBy: { createdAt: 'desc' }
     });
+
     res.json(bookings);
   } catch (error) {
+    console.error('Fetch bookings error', error);
     res.status(500).json({ error: 'Failed to fetch bookings' });
   }
 });

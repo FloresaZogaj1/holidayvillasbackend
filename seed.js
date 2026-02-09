@@ -1,14 +1,16 @@
 import { PrismaClient } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
   // Create admin user
+  const adminPassword = await bcrypt.hash('admin123', 10);
   const admin = await prisma.user.upsert({
     where: { email: 'admin@holidayvillas.com' },
     update: {},
     create: {
       email: 'admin@holidayvillas.com',
-      password: 'admin123',
+      password: adminPassword,
       name: 'Admin',
       role: 'admin',
     },
@@ -89,12 +91,15 @@ async function main() {
   });
 
   // Create sample staff users
+  const staff1Password = await bcrypt.hash('staff123', 10);
+  const staff2Password = await bcrypt.hash('manager123', 10);
+
   const staff1 = await prisma.user.upsert({
     where: { email: 'staff@holidayvillas.com' },
     update: {},
     create: {
       email: 'staff@holidayvillas.com',
-      password: 'staff123',
+      password: staff1Password,
       name: 'Staff Member',
       role: 'staff',
     },
@@ -105,7 +110,7 @@ async function main() {
     update: {},
     create: {
       email: 'manager@holidayvillas.com',
-      password: 'manager123',
+      password: staff2Password,
       name: 'Villa Manager',
       role: 'staff',
     },
