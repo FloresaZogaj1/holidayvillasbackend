@@ -1,5 +1,6 @@
 // utils/emailService.js (ESM)
 import nodemailer from "nodemailer";
+import { Resend } from "resend";
 
 /**
  * Creates a nodemailer transporter if EMAIL_USER/EMAIL_PASS exist.
@@ -17,6 +18,18 @@ export function createMailTransporterIfConfigured(env = process.env) {
       pass: EMAIL_PASS,
     },
   });
+}
+
+function getResendIfConfigured(env = process.env) {
+  const key = env.RESEND_API_KEY;
+  if (!key) return null;
+  return new Resend(key);
+}
+
+function getResendFrom(env = process.env) {
+  // Must be a verified sender in Resend. You can start with Resend's default domain,
+  // but in production you should use your own verified domain.
+  return env.RESEND_FROM || "onboarding@resend.dev";
 }
 
 export function pickPaymentDebugFields(p) {
@@ -63,12 +76,15 @@ export async function notifyPaymentByEmail({
   mailer,
   to,
 }) {
-  const EMAIL_USER = env.EMAIL_USER;
-  const ADMIN_EMAIL_TO = to || env.ADMIN_EMAIL_TO || EMAIL_USER;
+  const ADMIN_EMAIL_TO = to || env.ADMIN_EMAIL_TO || env.EMAIL_USER;
 
+  const resend = getResendIfConfigured(env);
   const transporter = mailer || createMailTransporterIfConfigured(env);
-  if (!transporter) {
-    console.warn("[payments/email] Skipped: EMAIL_USER/EMAIL_PASS not configured");
+
+  if (!resend && !transporter) {
+    console.warn(
+      "[payments/email] Skipped: configure RESEND_API_KEY (preferred) or EMAIL_USER/EMAIL_PASS"
+    );
     return;
   }
   if (!ADMIN_EMAIL_TO) {
@@ -91,14 +107,43 @@ export async function notifyPaymentByEmail({
     `\nSafe fields:\n${JSON.stringify(debug, null, 2)}\n`;
 
   try {
+    if (resend) {
+      const from = getResendFrom(env);
+      console.log("[payments/email] using provider=resend", {
+        to: ADMIN_EMAIL_TO,
+        from,
+        kind,
+        oid,
+      });
+
+      const result = await resend.emails.send({
+        from,
+        to: ADMIN_EMAIL_TO,
+        subject,
+        text,
+      });
+
+      // Resend returns { id } on success, or throws on error.
+      console.log("[payments/email] sent (resend)", { id: result?.id, kind, oid });
+      return;
+    }
+
+    // Fallback SMTP (Gmail)
+    console.log("[payments/email] using provider=smtp", {
+      to: ADMIN_EMAIL_TO,
+      from: env.EMAIL_USER,
+      kind,
+      oid,
+    });
     const info = await transporter.sendMail({
-      from: EMAIL_USER,
+      from: env.EMAIL_USER,
       to: ADMIN_EMAIL_TO,
       subject,
       text,
     });
-    console.log("[payments/email] sent", { messageId: info.messageId, kind, oid });
+    console.log("[payments/email] sent (smtp)", { messageId: info.messageId, kind, oid });
   } catch (err) {
+    // Resend throws rich errors; log the object so we see status/code.
     console.error("[payments/email] failed", err);
   }
 }

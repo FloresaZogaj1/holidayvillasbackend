@@ -21,8 +21,9 @@ const BKT_OK_URL    = process.env.BKT_OK_URL;
 const BKT_FAIL_URL  = process.env.BKT_FAIL_URL;
 
 // ---------- EMAIL (debug notifications on payment callbacks) ----------
-// Create once so we don't re-auth for every callback.
-const mailer = createMailTransporterIfConfigured(process.env);
+// If RESEND_API_KEY is set, emailService will use Resend. In that case,
+// don't initialize SMTP at all (Render -> Gmail was timing out).
+const mailer = process.env.RESEND_API_KEY ? null : createMailTransporterIfConfigured(process.env);
 
 // ---------- MIDDLEWARE ----------
 app.use(helmet({ crossOriginResourcePolicy: false }));
