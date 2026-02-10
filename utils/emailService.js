@@ -7,6 +7,12 @@ import { Resend } from "resend";
  * Gmail typically requires an App Password (not the normal account password).
  */
 export function createMailTransporterIfConfigured(env = process.env) {
+  // Safety: on many hosting providers (including Render), outbound SMTP to Gmail
+  // is blocked or times out. Default to disabling SMTP in production.
+  const allowSmtp = String(env.ALLOW_SMTP || "").toLowerCase() === "true";
+  const nodeEnv = env.NODE_ENV || "";
+  if (!allowSmtp && nodeEnv === "production") return null;
+
   const EMAIL_USER = env.EMAIL_USER;
   const EMAIL_PASS = env.EMAIL_PASS;
   if (!EMAIL_USER || !EMAIL_PASS) return null;
@@ -64,6 +70,34 @@ export function pickPaymentDebugFields(p) {
   return out;
 }
 
+function formatAttemptDetails(attempt) {
+  if (!attempt) return "";
+  const meta = attempt?.meta;
+  if (!meta || typeof meta !== "object") return "";
+
+  const customer = meta.customer || {};
+  const pricing = meta.pricing || {};
+
+  const name = [customer.firstName, customer.lastName].filter(Boolean).join(" ").trim();
+  const lines = [];
+  lines.push("Reservation details (from website meta):");
+  if (meta.villaName || meta.villa) lines.push(`- Villa: ${meta.villaName || meta.villa}`);
+  if (meta.category) lines.push(`- Category: ${meta.category}`);
+  if (name) lines.push(`- Guest name: ${name}`);
+  if (customer.email) lines.push(`- Guest email: ${customer.email}`);
+  if (customer.phone) lines.push(`- Guest phone: ${customer.phone}`);
+  if (meta.from) lines.push(`- Check-in: ${meta.from}`);
+  if (meta.to) lines.push(`- Check-out: ${meta.to}`);
+  if (meta.nights != null) lines.push(`- Nights: ${meta.nights}`);
+  if (meta.guests != null) lines.push(`- Guests: ${meta.guests}`);
+  if (pricing.totalPrice != null) lines.push(`- Total: ${pricing.totalPrice} ${pricing.currency || ""}`.trim());
+  if (pricing.basePerNight != null) lines.push(`- Base per night: ${pricing.basePerNight}`);
+  if (pricing.lodgingPerNight != null) lines.push(`- Lodging per night: ${pricing.lodgingPerNight}`);
+  if (pricing.breakfastIncluded != null) lines.push(`- Breakfast included: ${pricing.breakfastIncluded ? "yes" : "no"}`);
+
+  return `\n\n${lines.join("\n")}\n`;
+}
+
 /**
  * Sends a short email to admin about payment callback.
  * - Never throws (swallows errors); should not break redirects.
@@ -80,6 +114,15 @@ export async function notifyPaymentByEmail({
 
   const resend = getResendIfConfigured(env);
   const transporter = mailer || createMailTransporterIfConfigured(env);
+
+  const chosenProvider = resend ? "resend" : transporter ? "smtp" : "none";
+  console.log("[payments/email] provider selected", {
+    provider: chosenProvider,
+    hasResendKey: !!env.RESEND_API_KEY,
+    hasAdminTo: !!ADMIN_EMAIL_TO,
+    nodeEnv: env.NODE_ENV || null,
+    allowSmtp: String(env.ALLOW_SMTP || "").toLowerCase() === "true",
+  });
 
   if (!resend && !transporter) {
     console.warn(
@@ -104,6 +147,7 @@ export async function notifyPaymentByEmail({
     (redirectTarget ? `Redirect: ${redirectTarget}\n` : "") +
     (proc ? `ProcReturnCode: ${proc}\n` : "") +
     (md ? `mdStatus: ${md}\n` : "") +
+    formatAttemptDetails(payload?.attempt) +
     `\nSafe fields:\n${JSON.stringify(debug, null, 2)}\n`;
 
   try {

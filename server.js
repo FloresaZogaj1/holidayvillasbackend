@@ -6,6 +6,7 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import villasRouter from "./routes/villas.js";
 import { createMailTransporterIfConfigured, notifyPaymentByEmail, pickPaymentDebugFields } from "./utils/emailService.js";
+import { prisma } from "./db.js";
 dotenv.config();
 
 const app = express();
@@ -20,10 +21,21 @@ const BKT_3D_GATE   = process.env.BKT_3D_GATE || "https://pgw.bkt-ks.com/fim/est
 const BKT_OK_URL    = process.env.BKT_OK_URL;
 const BKT_FAIL_URL  = process.env.BKT_FAIL_URL;
 
+const ADMIN_EMAIL_TO = process.env.ADMIN_EMAIL_TO || "holidayvillas.ks@gmail.com";
+
 // ---------- EMAIL (debug notifications on payment callbacks) ----------
 // If RESEND_API_KEY is set, emailService will use Resend. In that case,
 // don't initialize SMTP at all (Render -> Gmail was timing out).
 const mailer = process.env.RESEND_API_KEY ? null : createMailTransporterIfConfigured(process.env);
+
+// Log email provider configuration (no secrets) so Render logs confirm which path is active.
+console.log("[startup/email] config", {
+  hasResendKey: !!process.env.RESEND_API_KEY,
+  hasSmtpUser: !!process.env.EMAIL_USER,
+  hasSmtpPass: !!process.env.EMAIL_PASS,
+  hasAdminTo: !!process.env.ADMIN_EMAIL_TO,
+  resolvedMailer: mailer ? "smtp" : "none",
+});
 
 // ---------- MIDDLEWARE ----------
 app.use(helmet({ crossOriginResourcePolicy: false }));
@@ -70,6 +82,26 @@ app.use("/api/admin", apiCors, villasRouter);
 
 // ---------- HEALTH ----------
 app.get("/health", (_req, res) => res.status(200).json({ ok: true }));
+
+// Diagnostics endpoint to confirm env is visible at runtime (no secrets).
+// Keep under /api to be visible in our request logger.
+app.get("/api/debug/email", (_req, res) => {
+  const allowSmtp = String(process.env.ALLOW_SMTP || "").toLowerCase() === "true";
+  const nodeEnv = process.env.NODE_ENV || null;
+  const smtpConfigured = !!process.env.EMAIL_USER && !!process.env.EMAIL_PASS;
+  const smtpEnabled = smtpConfigured && (allowSmtp || nodeEnv !== "production");
+  res.json({
+    hasResendKey: !!process.env.RESEND_API_KEY,
+    resendFrom: process.env.RESEND_FROM || null,
+    hasSmtpUser: !!process.env.EMAIL_USER,
+    hasSmtpPass: !!process.env.EMAIL_PASS,
+    hasAdminTo: !!process.env.ADMIN_EMAIL_TO,
+    nodeEnv,
+    allowSmtp,
+    smtpEnabled,
+    providerPreferred: process.env.RESEND_API_KEY ? "resend" : (smtpEnabled ? "smtp" : "none"),
+  });
+});
 
 // ---------- HASH HELPERS ----------
 function hashV3(fields, storeKey) {
@@ -149,6 +181,7 @@ r.post("/init", apiCors, (req, res) => {
     }
 
     const email = String(req.body?.email ?? "");
+    const meta = req.body?.meta ?? null;
     const fields = {
       clientid: String(BKT_CLIENT_ID),
       oid: crypto.randomBytes(10).toString("hex"),
@@ -174,7 +207,34 @@ r.post("/init", apiCors, (req, res) => {
     console.log("[payments/init] HASH_PLAIN_VER3:", plain);
     console.log("[payments/init] FIELDS_TO_GATE:", fields);
 
-    return res.json({ gate: BKT_3D_GATE, fields });
+    // Persist reservation metadata so /ok and /fail can email full reservation details.
+    // Don't block payment init if DB fails; just log.
+    (async () => {
+      try {
+        await prisma.paymentAttempt.upsert({
+          where: { oid: fields.oid },
+          update: {
+            amount: Number(amount),
+            currency: fields.currency,
+            email,
+            meta,
+            status: "initiated",
+          },
+          create: {
+            oid: fields.oid,
+            amount: Number(amount),
+            currency: fields.currency,
+            email,
+            meta,
+            status: "initiated",
+          },
+        });
+      } catch (e) {
+        console.error("[payments/init] failed to persist paymentAttempt", e?.message || e);
+      }
+    })();
+
+    return res.json({ gate: BKT_3D_GATE, fields, oid: fields.oid });
   } catch (err) {
     console.error("[payments/init] error", err);
     return res.status(500).json({ error: "Init failed" });
@@ -200,7 +260,24 @@ r.all("/ok", (req, res) => {
   console.log("[payments/ok] redirecting", { oid, transId, target });
 
   // Fire-and-forget email notification; do not block redirect.
-  notifyPaymentByEmail({ kind: "OK", payload: p, redirectTarget: target, mailer });
+  (async () => {
+    let attempt = null;
+    try {
+      if (oid) {
+        attempt = await prisma.paymentAttempt.findUnique({ where: { oid } });
+        await prisma.paymentAttempt.update({ where: { oid }, data: { status: "ok" } });
+      }
+    } catch (e) {
+      console.error("[payments/ok] paymentAttempt lookup/update failed", e?.message || e);
+    }
+    notifyPaymentByEmail({
+      kind: "OK",
+      payload: { ...p, attempt },
+      redirectTarget: target,
+      mailer,
+      to: ADMIN_EMAIL_TO,
+    });
+  })();
 
   return res.redirect(302, target);
 });
@@ -227,7 +304,24 @@ r.all("/fail", (req, res) => {
     console.warn("[payments/fail] redirecting", { oid, msg, transId, target });
 
     // Fire-and-forget email notification; do not block redirect.
-  notifyPaymentByEmail({ kind: "FAIL", payload: p, redirectTarget: target, mailer });
+    (async () => {
+      let attempt = null;
+      try {
+        if (oid && oid !== "unknown") {
+          attempt = await prisma.paymentAttempt.findUnique({ where: { oid } });
+          await prisma.paymentAttempt.update({ where: { oid }, data: { status: "fail" } });
+        }
+      } catch (e) {
+        console.error("[payments/fail] paymentAttempt lookup/update failed", e?.message || e);
+      }
+      notifyPaymentByEmail({
+        kind: "FAIL",
+        payload: { ...p, attempt },
+        redirectTarget: target,
+        mailer,
+        to: ADMIN_EMAIL_TO,
+      });
+    })();
 
     return res.redirect(302, target);
   } catch (err) {
@@ -235,7 +329,13 @@ r.all("/fail", (req, res) => {
     const target = `${FRONT_FAIL}${FRONT_FAIL.includes("?") ? "&" : "?"}oid=unknown&msg=Payment failed`;
 
     // Best-effort email about handler crash.
-  notifyPaymentByEmail({ kind: "FAIL_HANDLER_ERROR", payload: { error: String(err) }, redirectTarget: target, mailer });
+    notifyPaymentByEmail({
+      kind: "FAIL_HANDLER_ERROR",
+      payload: { error: String(err) },
+      redirectTarget: target,
+      mailer,
+      to: ADMIN_EMAIL_TO,
+    });
 
     return res.redirect(302, target);
   }

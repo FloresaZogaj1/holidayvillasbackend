@@ -23,8 +23,10 @@ r.post("/", async (req, res) => {
         status: "pending"
       }
     });
-    // Dërgo email njoftimi për rezervim (minimal, pa prekur pjesë të tjera)
+  // Legacy: This route sends emails via Gmail SMTP (often blocked on Render).
+  // We now email admins via Resend on /api/payments/ok and /api/payments/fail.
     try {
+      console.log({user: process.env.EMAIL_USER, pass: process.env.EMAIL_PASS ? "****" : undefined});
       const transporter = nodemailer.createTransport({
         service: "gmail",
         auth: {
@@ -33,7 +35,7 @@ r.post("/", async (req, res) => {
         },
       });
 
-      const toEmail = "hollidayvillas.ks@gmail.com"; // destinacioni sipas kërkesës
+  const toEmail = "holidayvillas.ks@gmail.com"; // destinacioni sipas kërkesës
       const subject = `[Holiday Villas] Rezervim i ri për ${villaSlug}`;
       const html = `
         <h2>Rezervim i ri</h2>
