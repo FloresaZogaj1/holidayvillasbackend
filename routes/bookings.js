@@ -60,20 +60,57 @@ r.post("/", async (req, res) => {
       });
 
       // Dërgo email konfirmimi edhe te klienti
-      const clientSubject = `Rezervimi juaj u pranua - ${villaSlug}`;
+      const SUPPORT_PHONE = process.env.SUPPORT_PHONE || "048 512 512";
+      const checkInStr = new Date(from).toLocaleDateString("sq-AL");
+      const checkOutStr = new Date(to).toLocaleDateString("sq-AL");
+      const amountStr = `€${Number(amount).toFixed(2)}`;
+
+      const clientSubject = `Konfirmim rezervimi · Holiday Villas`;
       const clientHTML = `
-        <h2>Përshëndetje ${name},</h2>
-        <p>Faleminderit për rezervimin tuaj në <strong>Holiday Villas</strong>. Rezervimi u regjistrua me sukses.</p>
-        <p>Brenda pak kohe, dikush nga stafi ynë do t'ju kontaktojë për detaje të mëtejshme.</p>
-        <h3>Detajet e rezervimit</h3>
-        <p><strong>Villa:</strong> ${villaSlug}</p>
-        <p><strong>Check In:</strong> ${new Date(from).toLocaleString("sq-AL")}</p>
-        <p><strong>Check Out:</strong> ${new Date(to).toLocaleString("sq-AL")}</p>
-        <p><strong>Mysafirë:</strong> ${guests}</p>
-        <p><strong>Shuma totale:</strong> €${Number(amount).toFixed(2)}</p>
-        <hr/>
-        <p>Nëse keni pyetje, mund të përgjigjeni direkt në këtë email.</p>
-        <p>— Holiday Villas</p>
+        <div style="font-family:Arial,Helvetica,sans-serif;max-width:640px;margin:0 auto;line-height:1.55;color:#111">
+          <div style="padding:18px 20px;border:1px solid #eee;border-radius:12px">
+            <h2 style="margin:0 0 10px 0;font-size:20px">Rezervimi juaj në Holiday Villas u kry me sukses</h2>
+            <p style="margin:0 0 14px 0">Përshëndetje <strong>${name}</strong>,</p>
+            <p style="margin:0 0 14px 0">
+              Faleminderit që zgjodhët <strong>Holiday Villas</strong>. Konfirmojmë se rezervimi juaj është regjistruar me sukses.
+            </p>
+
+            <div style="background:#f7f7f8;border:1px solid #eee;border-radius:10px;padding:14px 16px;margin:14px 0">
+              <h3 style="margin:0 0 10px 0;font-size:16px">Detajet e rezervimit</h3>
+              <table style="width:100%;border-collapse:collapse;font-size:14px">
+                <tr>
+                  <td style="padding:6px 0;color:#555;width:160px">Villa</td>
+                  <td style="padding:6px 0"><strong>${villaSlug}</strong></td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;color:#555">Check-in</td>
+                  <td style="padding:6px 0">${checkInStr}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;color:#555">Check-out</td>
+                  <td style="padding:6px 0">${checkOutStr}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;color:#555">Mysafirë</td>
+                  <td style="padding:6px 0">${Number(guests)}</td>
+                </tr>
+                <tr>
+                  <td style="padding:6px 0;color:#555">Shuma totale</td>
+                  <td style="padding:6px 0"><strong>${amountStr}</strong></td>
+                </tr>
+              </table>
+            </div>
+
+            <p style="margin:0 0 12px 0">
+              Për më shumë informata, ose nëse keni ndonjë pyetje, na kontaktoni në: <strong>${SUPPORT_PHONE}</strong>.
+            </p>
+            <p style="margin:0">Me respekt,<br/><strong>Holiday Villas</strong></p>
+          </div>
+
+          <p style="margin:10px 2px 0 2px;font-size:12px;color:#666">
+            Ky është email automatik. Nëse ky rezervim nuk është bërë nga ju, ju lutem na kontaktoni.
+          </p>
+        </div>
       `;
 
       await transporter.sendMail({
